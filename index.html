@@ -146,12 +146,14 @@
                 <ul style="text-align: left; margin: 10px 0;">
                     <li><strong>Trigger (Primary):</strong> Stop WebXR Session</li>
                     <li><strong>Grip/Secondary Trigger:</strong> Export Data</li>
+                    <li><strong>X/A Button:</strong> Play Chirp (16-20kHz)</li>
                     <li><strong>Menu Button:</strong> Toggle Audio Recording</li>
                 </ul>
                 <p><strong>Keyboard Shortcuts (VR Fallback):</strong></p>
                 <ul style="text-align: left; margin: 10px 0;">
                     <li><strong>S:</strong> Stop WebXR Session</li>
                     <li><strong>E:</strong> Export Data</li>
+                    <li><strong>P:</strong> Play Chirp</li>
                     <li><strong>A:</strong> Toggle Audio Recording</li>
                     <li><strong>C:</strong> Clear All Data</li>
                 </ul>
@@ -165,6 +167,7 @@
         <div class="controls">
             <button id="init-btn" class="primary-btn">Initialize WebXR</button>
             <button id="start-audio-btn" class="secondary-btn" disabled>Start Audio Analysis</button>
+            <button id="play-chirp-btn" class="secondary-btn">🔊 Play Chirp</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
             <button id="github-setup-btn" class="secondary-btn">Setup GitHub</button>
             <button id="clear-btn" class="secondary-btn">Clear Data</button>
@@ -236,6 +239,11 @@
                     lastExportPress: 0
                 };
                 
+                // Chirp playback system
+                this.chirpAudio = null;
+                this.chirpPlaybackContext = null;
+                this.chirpLoadPromise = null;
+                
                 // High-frequency data storage
                 this.imuData = [];
                 this.audioData = [];
@@ -260,6 +268,7 @@
                 // UI elements
                 this.initBtn = document.getElementById('init-btn');
                 this.startAudioBtn = document.getElementById('start-audio-btn');
+                this.playChirpBtn = document.getElementById('play-chirp-btn');
                 this.exportBtn = document.getElementById('export-btn');
                 this.githubSetupBtn = document.getElementById('github-setup-btn');
                 this.clearBtn = document.getElementById('clear-btn');
@@ -271,6 +280,7 @@
                 console.log('UI Elements found:', {
                     initBtn: !!this.initBtn,
                     startAudioBtn: !!this.startAudioBtn,
+                    playChirpBtn: !!this.playChirpBtn,
                     exportBtn: !!this.exportBtn,
                     githubSetupBtn: !!this.githubSetupBtn,
                     clearBtn: !!this.clearBtn,
@@ -296,6 +306,12 @@
                     console.log('Audio button clicked!');
                     e.preventDefault();
                     this.toggleAudio();
+                });
+                
+                this.playChirpBtn.addEventListener('click', (e) => {
+                    console.log('Chirp button clicked!');
+                    e.preventDefault();
+                    this.playChirp();
                 });
                 
                 this.exportBtn.addEventListener('click', (e) => {
@@ -324,6 +340,9 @@
                 
                 // Check if token is already saved
                 this.checkGitHubToken();
+                
+                // Initialize chirp audio system
+                this.initializeChirpAudio();
                 
                 console.log('Event listeners set up successfully');
                 
@@ -1208,6 +1227,157 @@
                 statusElement.style.fontWeight = 'bold';
             }
 
+            // Chirp Audio System
+            async initializeChirpAudio() {
+                try {
+                    console.log('Initializing chirp audio system...');
+                    
+                    // Create a separate audio context for chirp playback
+                    this.chirpPlaybackContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 48000
+                    });
+                    
+                    // Load the chirp audio file
+                    this.chirpLoadPromise = this.loadChirpFile();
+                    
+                    console.log('Chirp audio system initialized');
+                    
+                } catch (error) {
+                    console.error('Failed to initialize chirp audio system:', error);
+                    this.updateStatus('Chirp audio system initialization failed: ' + error.message, 'warning');
+                }
+            }
+
+            async loadChirpFile() {
+                try {
+                    console.log('Loading chirp audio file...');
+                    
+                    // Try to load the chirp file
+                    const response = await fetch('./chirp_16_20khz_40ms.wav');
+                    
+                    if (!response.ok) {
+                        throw new Error(`Failed to load chirp file: ${response.status} ${response.statusText}`);
+                    }
+                    
+                    const arrayBuffer = await response.arrayBuffer();
+                    this.chirpAudio = await this.chirpPlaybackContext.decodeAudioData(arrayBuffer);
+                    
+                    console.log('Chirp audio loaded successfully:', {
+                        duration: this.chirpAudio.duration,
+                        sampleRate: this.chirpAudio.sampleRate,
+                        channels: this.chirpAudio.numberOfChannels
+                    });
+                    
+                    this.updateStatus('Chirp audio loaded successfully', 'success');
+                    
+                } catch (error) {
+                    console.warn('Could not load chirp file:', error);
+                    this.updateStatus('Chirp file not found - please add chirp_16_20khz_40ms.wav to project', 'warning');
+                    
+                    // Generate a synthetic chirp as fallback
+                    this.generateSyntheticChirp();
+                }
+            }
+
+            generateSyntheticChirp() {
+                try {
+                    console.log('Generating synthetic chirp...');
+                    
+                    const sampleRate = 48000;
+                    const duration = 0.04; // 40ms
+                    const startFreq = 16000; // 16kHz
+                    const endFreq = 20000;   // 20kHz
+                    
+                    const samples = Math.floor(sampleRate * duration);
+                    this.chirpAudio = this.chirpPlaybackContext.createBuffer(1, samples, sampleRate);
+                    
+                    const channelData = this.chirpAudio.getChannelData(0);
+                    
+                    for (let i = 0; i < samples; i++) {
+                        const t = i / sampleRate;
+                        const progress = t / duration;
+                        
+                        // Linear frequency sweep from startFreq to endFreq
+                        const frequency = startFreq + (endFreq - startFreq) * progress;
+                        
+                        // Generate the chirp signal with envelope
+                        const phase = 2 * Math.PI * frequency * t;
+                        const envelope = Math.sin(Math.PI * progress); // Bell-shaped envelope
+                        
+                        channelData[i] = envelope * Math.sin(phase) * 0.5; // 50% volume
+                    }
+                    
+                    console.log('Synthetic chirp generated successfully');
+                    this.updateStatus('Synthetic chirp generated (16-20kHz, 40ms)', 'success');
+                    
+                } catch (error) {
+                    console.error('Failed to generate synthetic chirp:', error);
+                    this.updateStatus('Failed to generate chirp audio', 'error');
+                }
+            }
+
+            async playChirp() {
+                try {
+                    console.log('Playing chirp...');
+                    
+                    // Ensure chirp is loaded
+                    if (this.chirpLoadPromise) {
+                        await this.chirpLoadPromise;
+                    }
+                    
+                    if (!this.chirpAudio) {
+                        throw new Error('Chirp audio not available');
+                    }
+                    
+                    // Resume audio context if suspended (required for user interaction)
+                    if (this.chirpPlaybackContext.state === 'suspended') {
+                        await this.chirpPlaybackContext.resume();
+                    }
+                    
+                    // Create audio source and connect to output
+                    const source = this.chirpPlaybackContext.createBufferSource();
+                    source.buffer = this.chirpAudio;
+                    source.connect(this.chirpPlaybackContext.destination);
+                    
+                    // Log the chirp playback event with timestamp
+                    const chirpTimestamp = Date.now();
+                    console.log('Chirp played at timestamp:', chirpTimestamp);
+                    
+                    // Store chirp event in audio data for analysis
+                    if (this.audioData) {
+                        this.audioData.push({
+                            timestamp: chirpTimestamp,
+                            event: 'chirp_playback',
+                            frequency_range: '16-20kHz',
+                            duration: this.chirpAudio.duration * 1000 // in ms
+                        });
+                    }
+                    
+                    // Play the chirp
+                    source.start();
+                    
+                    // Update UI
+                    this.playChirpBtn.textContent = '🔊 Playing...';
+                    this.playChirpBtn.disabled = true;
+                    
+                    // Re-enable button after chirp finishes
+                    setTimeout(() => {
+                        this.playChirpBtn.textContent = '🔊 Play Chirp';
+                        this.playChirpBtn.disabled = false;
+                    }, this.chirpAudio.duration * 1000 + 100);
+                    
+                    this.updateStatus(`Chirp played (${this.chirpAudio.duration * 1000}ms)`, 'success');
+                    
+                } catch (error) {
+                    console.error('Failed to play chirp:', error);
+                    this.updateStatus('Failed to play chirp: ' + error.message, 'error');
+                    
+                    // Re-enable button on error
+                    this.playChirpBtn.textContent = '🔊 Play Chirp';
+                    this.playChirpBtn.disabled = false;
+                }
+            }
+
             // VR Controller and Input Handling
             setupControllers(event) {
                 console.log('Input sources changed:', event);
@@ -1279,6 +1449,15 @@
                                 this.toggleAudio();
                             }
                         }
+                        
+                        // X/A button (index 2) = Play Chirp
+                        if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
+                            if (currentTime - (this.vrButtonStates.lastChirpPlay || 0) > 1000) {
+                                this.vrButtonStates.lastChirpPlay = currentTime;
+                                console.log('VR Controller: Chirp playback triggered');
+                                this.playChirp();
+                            }
+                        }
                     }
                 }
             }
@@ -1324,6 +1503,15 @@
                             this.vrButtonStates.lastClear = currentTime;
                             console.log('Keyboard: Clear data triggered');
                             this.clearData();
+                            event.preventDefault();
+                        }
+                        break;
+                        
+                    case 'p':
+                        if (currentTime - (this.vrButtonStates.lastChirpPlay || 0) > 1000) {
+                            this.vrButtonStates.lastChirpPlay = currentTime;
+                            console.log('Keyboard: Chirp playback triggered');
+                            this.playChirp();
                             event.preventDefault();
                         }
                         break;
