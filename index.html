@@ -245,7 +245,11 @@
                 this.chirpLoadPromise = null;
                 
                 // Raw PCM audio capture system
-                this.rawAudioSamples = [];
+                this.rawAudioSamples = {
+                    left: [],   // Left channel samples
+                    right: []   // Right channel samples
+                };
+                this.audioChannelCount = 2; // Default to stereo
                 this.audioWorkletNode = null;
                 this.useAudioWorklet = true; // Try AudioWorklet first, fallback to ScriptProcessor
                 
@@ -363,36 +367,42 @@
                 };
                 
                 window.testWAVExport = () => {
-                    console.log('Testing WAV export with synthetic audio...');
+                    console.log('Testing stereo WAV export with synthetic audio...');
                     
-                    // Generate test audio (1 second of 440Hz tone)
+                    // Generate test audio (1 second of 440Hz left, 880Hz right)
                     const sampleRate = 48000;
                     const duration = 1.0; // 1 second
-                    const frequency = 440; // A4 note
-                    const samples = new Float32Array(sampleRate * duration);
+                    const leftFreq = 440; // A4 note
+                    const rightFreq = 880; // A5 note (octave higher)
+                    const leftSamples = new Float32Array(sampleRate * duration);
+                    const rightSamples = new Float32Array(sampleRate * duration);
                     
-                    for (let i = 0; i < samples.length; i++) {
-                        samples[i] = Math.sin(2 * Math.PI * frequency * i / sampleRate) * 0.5;
+                    for (let i = 0; i < leftSamples.length; i++) {
+                        leftSamples[i] = Math.sin(2 * Math.PI * leftFreq * i / sampleRate) * 0.5;
+                        rightSamples[i] = Math.sin(2 * Math.PI * rightFreq * i / sampleRate) * 0.5;
                     }
                     
-                    console.log('Generated test samples:', samples.length);
+                    console.log('Generated test stereo samples:', leftSamples.length, 'per channel');
                     
                     // Temporarily set raw samples and export
                     const originalSamples = this.rawAudioSamples;
-                    this.rawAudioSamples = samples;
+                    this.rawAudioSamples = {
+                        left: leftSamples,
+                        right: rightSamples
+                    };
                     
-                    // Test WAV encoding
+                    // Test stereo WAV encoding
                     try {
-                        const wavBuffer = this.encodeWAV(samples, sampleRate, 1);
+                        const wavBuffer = this.encodeWAV(leftSamples, rightSamples, sampleRate);
                         const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-                        const filename = `test_wav_${Date.now()}.wav`;
+                        const filename = `test_stereo_wav_${Date.now()}.wav`;
                         
                         this.downloadFile(wavBlob, filename);
-                        console.log('Test WAV export successful!');
-                        this.updateStatus('Test WAV file exported successfully', 'success');
+                        console.log('Test stereo WAV export successful!');
+                        this.updateStatus('Test stereo WAV file exported successfully', 'success');
                     } catch (error) {
-                        console.error('Test WAV export failed:', error);
-                        this.updateStatus('Test WAV export failed: ' + error.message, 'error');
+                        console.error('Test stereo WAV export failed:', error);
+                        this.updateStatus('Test stereo WAV export failed: ' + error.message, 'error');
                     }
                     
                     // Restore original samples
@@ -785,7 +795,7 @@
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         audio: {
                             sampleRate: 48000,           // 48kHz
-                            channelCount: 1,             // Mono
+                            channelCount: 2,             // Stereo (dual channel)
                             echoCancellation: false,
                             noiseSuppression: false,
                             autoGainControl: false,
@@ -856,23 +866,41 @@
                 
                 // Handle messages from the processor
                 this.audioWorkletNode.port.onmessage = (event) => {
-                    const { type, samples, sampleRate, duration } = event.data;
+                    const { type, samplesLeft, samplesRight, samples, sampleRate, channelCount, duration } = event.data;
                     
                     switch (type) {
                         case 'recordingStarted':
-                            console.log('Raw PCM recording started via AudioWorklet');
+                            console.log('Raw PCM recording started via AudioWorklet:', channelCount || 1, 'channels');
+                            this.audioChannelCount = channelCount || 1;
                             break;
                             
                         case 'audioChunk':
-                            // Accumulate audio chunks
-                            this.rawAudioSamples.push(...samples);
-                            console.log('AudioWorklet chunk received:', samples.length, 'samples, total:', this.rawAudioSamples.length);
+                            // Accumulate audio chunks (stereo)
+                            if (samplesLeft && samplesRight) {
+                                this.rawAudioSamples.left.push(...samplesLeft);
+                                this.rawAudioSamples.right.push(...samplesRight);
+                                console.log('AudioWorklet stereo chunk received:', samplesLeft.length, 'samples per channel, total L/R:', 
+                                    this.rawAudioSamples.left.length, '/', this.rawAudioSamples.right.length);
+                            } else if (samples) {
+                                // Fallback for mono
+                                this.rawAudioSamples.left.push(...samples);
+                                this.rawAudioSamples.right.push(...samples);
+                                console.log('AudioWorklet mono chunk received:', samples.length, 'samples, duplicated to stereo');
+                            }
                             break;
                             
                         case 'recordingStopped':
-                            // Final samples
-                            this.rawAudioSamples.push(...samples);
-                            console.log(`Raw PCM recording completed: ${this.rawAudioSamples.length} samples, ${duration.toFixed(2)}s`);
+                            // Final samples (stereo)
+                            if (samplesLeft && samplesRight) {
+                                this.rawAudioSamples.left.push(...samplesLeft);
+                                this.rawAudioSamples.right.push(...samplesRight);
+                                console.log(`Raw PCM recording completed: ${this.rawAudioSamples.left.length} samples per channel, ${duration.toFixed(2)}s`);
+                            } else if (samples) {
+                                // Fallback for mono
+                                this.rawAudioSamples.left.push(...samples);
+                                this.rawAudioSamples.right.push(...samples);
+                                console.log(`Raw PCM recording completed (mono): ${samples.length} samples, ${duration.toFixed(2)}s`);
+                            }
                             break;
                     }
                 };
@@ -883,7 +911,10 @@
                 // Start recording
                 this.audioWorkletNode.port.postMessage({
                     command: 'setSampleRate',
-                    data: { sampleRate: this.audioContext.sampleRate }
+                    data: { 
+                        sampleRate: this.audioContext.sampleRate,
+                        channelCount: this.audioChannelCount
+                    }
                 });
                 
                 this.audioWorkletNode.port.postMessage({
@@ -898,15 +929,19 @@
                 
                 this.scriptProcessor.onaudioprocess = (event) => {
                     const inputBuffer = event.inputBuffer;
-                    const channelData = inputBuffer.getChannelData(0);
+                    const leftChannel = inputBuffer.getChannelData(0);
+                    const rightChannel = inputBuffer.numberOfChannels > 1 ? 
+                        inputBuffer.getChannelData(1) : leftChannel; // Duplicate left if mono
                     
-                    // Copy samples to our raw buffer
-                    const oldLength = this.rawAudioSamples.length;
-                    this.rawAudioSamples.push(...channelData);
+                    // Copy samples to our raw buffers
+                    const oldLengthLeft = this.rawAudioSamples.left.length;
+                    this.rawAudioSamples.left.push(...leftChannel);
+                    this.rawAudioSamples.right.push(...rightChannel);
                     
                     // Log every 100th chunk to avoid spam
-                    if (Math.floor(this.rawAudioSamples.length / 4096) !== Math.floor(oldLength / 4096)) {
-                        console.log('ScriptProcessor samples:', channelData.length, 'new, total:', this.rawAudioSamples.length);
+                    if (Math.floor(this.rawAudioSamples.left.length / 4096) !== Math.floor(oldLengthLeft / 4096)) {
+                        console.log('ScriptProcessor stereo samples:', leftChannel.length, 'per channel, total L/R:', 
+                            this.rawAudioSamples.left.length, '/', this.rawAudioSamples.right.length);
                     }
                 };
                 
@@ -1011,11 +1046,12 @@
                 
                 this.startAudioBtn.textContent = 'Start Audio Analysis';
                 
-                const sampleCount = this.rawAudioSamples.length;
-                const duration = sampleCount / 48000; // Assuming 48kHz
+                const leftSampleCount = this.rawAudioSamples.left.length;
+                const rightSampleCount = this.rawAudioSamples.right.length;
+                const duration = leftSampleCount / 48000; // Assuming 48kHz
                 
-                this.updateStatus(`Raw PCM recording stopped: ${sampleCount} samples (${duration.toFixed(2)}s)`, 'warning');
-                console.log('Raw audio samples captured:', sampleCount);
+                this.updateStatus(`Raw PCM stereo recording stopped: ${leftSampleCount} samples per channel (${duration.toFixed(2)}s)`, 'warning');
+                console.log('Raw stereo audio samples captured - Left:', leftSampleCount, 'Right:', rightSampleCount);
             }
 
             updateIMUDisplay(reading) {
@@ -1050,15 +1086,19 @@
             updateAudioDisplay(reading) {
                 const audioElement = document.getElementById('audio-data');
                 const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
-                const duration = this.rawAudioSamples.length / sampleRate;
+                const leftSamples = this.rawAudioSamples.left.length;
+                const rightSamples = this.rawAudioSamples.right.length;
+                const duration = leftSamples / sampleRate;
                 
                 audioElement.innerHTML = `
                     <strong>Timestamp:</strong> ${new Date(reading.timestamp).toLocaleTimeString()}<br>
                     <strong>Sample Rate:</strong> ${sampleRate}Hz (Raw PCM)<br>
+                    <strong>Channels:</strong> ${this.audioChannelCount || 2} (Stereo)<br>
                     <strong>RMS Level:</strong> ${reading.rms}<br>
                     <strong>Peak:</strong> ${reading.peak}<br>
                     <strong>Spectral Centroid:</strong> ${reading.spectralCentroid}<br>
-                    <strong>Raw Samples:</strong> ${this.rawAudioSamples.length.toLocaleString()}<br>
+                    <strong>Left Samples:</strong> ${leftSamples.toLocaleString()}<br>
+                    <strong>Right Samples:</strong> ${rightSamples.toLocaleString()}<br>
                     <strong>Recording Duration:</strong> ${duration.toFixed(3)}s<br>
                     <strong>Capture Method:</strong> ${this.useAudioWorklet && this.audioWorkletNode ? 'AudioWorklet' : 'ScriptProcessor'}
                 `;
@@ -1072,8 +1112,9 @@
                     ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
                 
                 const dataRate = this.xrPoseData.length / Math.max(duration, 1);
-                const audioSamples = this.rawAudioSamples.length;
-                const audioSize = audioSamples / (this.audioContext ? this.audioContext.sampleRate : 48000);
+                const leftAudioSamples = this.rawAudioSamples.left.length;
+                const rightAudioSamples = this.rawAudioSamples.right.length;
+                const audioSize = leftAudioSamples / (this.audioContext ? this.audioContext.sampleRate : 48000);
                 
                 statsElement.innerHTML = `
                     <strong>Session Duration:</strong> ${duration}s<br>
@@ -1090,31 +1131,44 @@
                     &nbsp;&nbsp;XR Views CSV: ~${(this.xrViewData.length * 100 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Projection CSV: ~${(this.xrProjectionData.length * 200 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;IMU Motion CSV: ~${(this.imuData.length * 100 / 1024).toFixed(1)}KB<br>
-                    &nbsp;&nbsp;Raw Audio WAV: ~${(audioSamples * 2 / 1024 / 1024).toFixed(1)}MB
+                    &nbsp;&nbsp;Stereo Audio WAV: ~${((leftAudioSamples + rightAudioSamples) * 2 / 1024 / 1024).toFixed(1)}MB
                 `;
             }
 
-            // WAV File Encoder for Raw PCM Data
-            encodeWAV(samples, sampleRate = 48000, numChannels = 1) {
+            // WAV File Encoder for Raw PCM Data (Stereo Support)
+            encodeWAV(leftSamples, rightSamples = null, sampleRate = 48000) {
+                // Determine if stereo or mono
+                const numChannels = rightSamples ? 2 : 1;
+                const samples = rightSamples ? { left: leftSamples, right: rightSamples } : { left: leftSamples };
+                
                 console.log('WAV Encoder input:', {
-                    samplesType: samples.constructor.name,
-                    samplesLength: samples.length,
+                    leftSamplesType: leftSamples.constructor.name,
+                    leftSamplesLength: leftSamples.length,
+                    rightSamplesLength: rightSamples ? rightSamples.length : 'N/A',
                     sampleRate: sampleRate,
                     numChannels: numChannels,
-                    firstSample: samples[0],
-                    lastSample: samples[samples.length - 1]
+                    firstLeftSample: leftSamples[0],
+                    firstRightSample: rightSamples ? rightSamples[0] : 'N/A'
                 });
                 
-                if (!samples || samples.length === 0) {
+                if (!leftSamples || leftSamples.length === 0) {
                     throw new Error('No audio samples provided to WAV encoder');
                 }
                 
-                if (!(samples instanceof Float32Array) && !Array.isArray(samples)) {
-                    throw new Error('Samples must be Float32Array or regular array');
+                if (!(leftSamples instanceof Float32Array) && !Array.isArray(leftSamples)) {
+                    throw new Error('Left samples must be Float32Array or regular array');
                 }
                 
-                const length = samples.length;
-                const dataSize = length * 2; // 16-bit samples
+                if (rightSamples && (!(rightSamples instanceof Float32Array) && !Array.isArray(rightSamples))) {
+                    throw new Error('Right samples must be Float32Array or regular array');
+                }
+                
+                if (rightSamples && leftSamples.length !== rightSamples.length) {
+                    throw new Error('Left and right channel samples must have same length');
+                }
+                
+                const length = leftSamples.length;
+                const dataSize = length * numChannels * 2; // 16-bit samples * channels
                 const fileSize = 44 + dataSize;
                 
                 console.log('WAV file structure:', {
@@ -1149,31 +1203,56 @@
                 writeString(36, 'data');                         // Subchunk2 ID
                 view.setUint32(40, dataSize, true);              // Subchunk2 size
                 
-                // Convert float samples to 16-bit PCM
+                // Convert float samples to 16-bit PCM (interleaved for stereo)
                 let offset = 44;
                 let clippedSamples = 0;
                 
                 for (let i = 0; i < length; i++) {
-                    let sample = samples[i];
+                    // Left channel
+                    let leftSample = leftSamples[i];
                     
                     // Handle NaN or undefined samples
-                    if (isNaN(sample) || sample === undefined || sample === null) {
-                        sample = 0;
+                    if (isNaN(leftSample) || leftSample === undefined || leftSample === null) {
+                        leftSample = 0;
                     }
                     
                     // Clamp sample to [-1, 1] range
-                    if (sample > 1) {
-                        sample = 1;
+                    if (leftSample > 1) {
+                        leftSample = 1;
                         clippedSamples++;
-                    } else if (sample < -1) {
-                        sample = -1;
+                    } else if (leftSample < -1) {
+                        leftSample = -1;
                         clippedSamples++;
                     }
                     
                     // Convert to 16-bit signed integer
-                    const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-                    view.setInt16(offset, Math.round(intSample), true);
+                    const leftIntSample = leftSample < 0 ? leftSample * 0x8000 : leftSample * 0x7FFF;
+                    view.setInt16(offset, Math.round(leftIntSample), true);
                     offset += 2;
+                    
+                    // Right channel (if stereo)
+                    if (numChannels === 2) {
+                        let rightSample = rightSamples[i];
+                        
+                        // Handle NaN or undefined samples
+                        if (isNaN(rightSample) || rightSample === undefined || rightSample === null) {
+                            rightSample = 0;
+                        }
+                        
+                        // Clamp sample to [-1, 1] range
+                        if (rightSample > 1) {
+                            rightSample = 1;
+                            clippedSamples++;
+                        } else if (rightSample < -1) {
+                            rightSample = -1;
+                            clippedSamples++;
+                        }
+                        
+                        // Convert to 16-bit signed integer
+                        const rightIntSample = rightSample < 0 ? rightSample * 0x8000 : rightSample * 0x7FFF;
+                        view.setInt16(offset, Math.round(rightIntSample), true);
+                        offset += 2;
+                    }
                 }
                 
                 if (clippedSamples > 0) {
@@ -1203,7 +1282,21 @@
                     this.updateStatus('Preparing data export...', 'warning');
                     
                     const timestamp = Date.now();
-                    const dateStr = new Date(timestamp).toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                    
+                    // Create EST timestamp string
+                    const now = new Date(timestamp);
+                    const estOffset = -5; // EST is UTC-5 (adjust to -4 for EDT during daylight saving)
+                    const estTime = new Date(now.getTime() + (estOffset * 60 * 60 * 1000));
+                    
+                    // Format: YYYY-MM-DD_HH-mm-ss_EST
+                    const year = estTime.getUTCFullYear();
+                    const month = String(estTime.getUTCMonth() + 1).padStart(2, '0');
+                    const day = String(estTime.getUTCDate()).padStart(2, '0');
+                    const hour = String(estTime.getUTCHours()).padStart(2, '0');
+                    const minute = String(estTime.getUTCMinutes()).padStart(2, '0');
+                    const second = String(estTime.getUTCSeconds()).padStart(2, '0');
+                    
+                    const dateStr = `${year}-${month}-${day}_${hour}-${minute}-${second}_EST`;
                     
                     let exportedFiles = [];
                     
@@ -1255,56 +1348,69 @@
                         exportedFiles.push(filename);
                     }
                     
-                    // 5. Export Raw PCM Audio as WAV file
-                    if (this.rawAudioSamples.length > 0) {
-                        console.log('Exporting raw PCM audio...', {
-                            sampleCount: this.rawAudioSamples.length,
-                            dataType: typeof this.rawAudioSamples,
-                            isArray: Array.isArray(this.rawAudioSamples),
-                            firstFewSamples: this.rawAudioSamples.slice(0, 10)
+                    // 5. Export Raw PCM Audio as Stereo WAV file
+                    if (this.rawAudioSamples.left.length > 0) {
+                        console.log('Exporting raw PCM stereo audio...', {
+                            leftSampleCount: this.rawAudioSamples.left.length,
+                            rightSampleCount: this.rawAudioSamples.right.length,
+                            leftDataType: typeof this.rawAudioSamples.left,
+                            rightDataType: typeof this.rawAudioSamples.right,
+                            channels: this.audioChannelCount || 2
                         });
                         
                         const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
                         
                         // Convert to Float32Array if needed
-                        let samplesArray;
-                        if (this.rawAudioSamples instanceof Float32Array) {
-                            samplesArray = this.rawAudioSamples;
-                        } else if (Array.isArray(this.rawAudioSamples)) {
-                            samplesArray = new Float32Array(this.rawAudioSamples);
+                        let leftSamplesArray, rightSamplesArray;
+                        
+                        if (this.rawAudioSamples.left instanceof Float32Array) {
+                            leftSamplesArray = this.rawAudioSamples.left;
+                        } else if (Array.isArray(this.rawAudioSamples.left)) {
+                            leftSamplesArray = new Float32Array(this.rawAudioSamples.left);
                         } else {
-                            console.error('Invalid audio samples format:', typeof this.rawAudioSamples);
-                            this.updateStatus('Error: Invalid audio samples format', 'error');
+                            console.error('Invalid left audio samples format:', typeof this.rawAudioSamples.left);
+                            this.updateStatus('Error: Invalid left audio samples format', 'error');
                             return;
                         }
                         
-                        console.log('Converting to WAV...', {
-                            samplesType: samplesArray.constructor.name,
-                            samplesLength: samplesArray.length,
+                        if (this.rawAudioSamples.right instanceof Float32Array) {
+                            rightSamplesArray = this.rawAudioSamples.right;
+                        } else if (Array.isArray(this.rawAudioSamples.right)) {
+                            rightSamplesArray = new Float32Array(this.rawAudioSamples.right);
+                        } else {
+                            console.error('Invalid right audio samples format:', typeof this.rawAudioSamples.right);
+                            this.updateStatus('Error: Invalid right audio samples format', 'error');
+                            return;
+                        }
+                        
+                        console.log('Converting to stereo WAV...', {
+                            leftSamplesLength: leftSamplesArray.length,
+                            rightSamplesLength: rightSamplesArray.length,
                             sampleRate: sampleRate,
-                            duration: samplesArray.length / sampleRate
+                            duration: leftSamplesArray.length / sampleRate,
+                            channels: 2
                         });
                         
-                        const wavBuffer = this.encodeWAV(samplesArray, sampleRate, 1);
-                        console.log('WAV buffer created:', {
+                        const wavBuffer = this.encodeWAV(leftSamplesArray, rightSamplesArray, sampleRate);
+                        console.log('Stereo WAV buffer created:', {
                             bufferSize: wavBuffer.byteLength,
                             bufferSizeMB: (wavBuffer.byteLength / 1024 / 1024).toFixed(2)
                         });
                         
                         const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-                        const filename = `raw_audio_pcm_${dateStr}.wav`;
+                        const filename = `raw_audio_stereo_${dateStr}.wav`;
                         
-                        console.log('Created WAV blob:', {
+                        console.log('Created stereo WAV blob:', {
                             blobSize: wavBlob.size,
                             blobType: wavBlob.type,
                             filename: filename
                         });
                         
-                        await this.exportToGitHub(wavBlob, filename, 'Raw PCM audio data (WAV format)');
+                        await this.exportToGitHub(wavBlob, filename, 'Raw PCM stereo audio data (WAV format)');
                         this.downloadFile(wavBlob, filename);
                         exportedFiles.push(filename);
                         
-                        this.updateStatus(`WAV file exported: ${filename} (${(wavBlob.size / 1024 / 1024).toFixed(2)}MB)`, 'success');
+                        this.updateStatus(`Stereo WAV file exported: ${filename} (${(wavBlob.size / 1024 / 1024).toFixed(2)}MB)`, 'success');
                     } else {
                         console.warn('No raw audio samples to export');
                         this.updateStatus('No raw audio samples captured for export', 'warning');
@@ -1803,7 +1909,10 @@
                 this.audioData = [];
                 this.audioChunks = [];
                 this.rawAudioBuffer = [];
-                this.rawAudioSamples = []; // Clear raw PCM samples
+                this.rawAudioSamples = {
+                    left: [],
+                    right: []
+                }; // Clear raw PCM samples
                 
                 // Clear comprehensive XR data
                 this.xrPoseData = [];

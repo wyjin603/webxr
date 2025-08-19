@@ -40,13 +40,14 @@ This directory contains comprehensive data files collected from the WebXR IMU & 
   - Gyroscope (Gx, Gy, Gz): rad/s
   - Quaternion (QuatW, QuatX, QuatY, QuatZ): normalized
 
-### Raw Audio Files (`raw_audio_pcm_*.wav`)
+### Raw Audio Files (`raw_audio_stereo_*.wav`)
 - **Format**: Uncompressed WAV (PCM 16-bit)
 - **Sample Rate**: 48kHz
-- **Channels**: Mono (1 channel)
+- **Channels**: 2 (Stereo) - interleaved Left/Right
 - **Capture Method**: Raw PCM via AudioWorklet/ScriptProcessor
-- **Quality**: Lossless, full-resolution audio data
+- **Quality**: Lossless, full-resolution stereo audio data
 - **Description**: Direct microphone samples without compression
+- **Note**: If mono input is detected, left channel is duplicated to right channel
 
 ### Session Metadata (`session_metadata_*.json`)
 - **Format**: JSON
@@ -62,12 +63,20 @@ import numpy as np
 import scipy.io.wavfile as wav
 from scipy import signal
 
-# Load raw WAV file
-sample_rate, audio_data = wav.read('raw_audio_pcm_2024-01-15T10-30-45.wav')
-print(f"Sample rate: {sample_rate}Hz, Duration: {len(audio_data)/sample_rate:.2f}s")
+# Load raw stereo WAV file
+sample_rate, audio_data = wav.read('raw_audio_stereo_2024-01-15_10-30-45_EST.wav')
+print(f"Sample rate: {sample_rate}Hz, Channels: {audio_data.shape[1] if len(audio_data.shape) > 1 else 1}")
+print(f"Duration: {len(audio_data)/sample_rate:.2f}s")
 
 # Convert to float32 for analysis
-audio_float = audio_data.astype(np.float32) / 32768.0
+if len(audio_data.shape) > 1:
+    # Stereo audio - separate channels
+    left_channel = audio_data[:, 0].astype(np.float32) / 32768.0
+    right_channel = audio_data[:, 1].astype(np.float32) / 32768.0
+    audio_float = left_channel  # Use left channel for analysis, or combine both
+else:
+    # Mono audio (fallback)
+    audio_float = audio_data.astype(np.float32) / 32768.0
 
 # Analyze chirp responses
 def find_chirp_responses(audio, fs, chirp_freq_range=(16000, 20000)):
@@ -156,9 +165,11 @@ gyroscope = imu_df[['Gx', 'Gy', 'Gz']].values
 
 ## File Naming Convention
 
-Files are automatically named with ISO timestamps:
-- Format: `{type}_data_{YYYY-MM-DDTHH-mm-ss}.{ext}`
-- Example: `imu_data_2024-01-15T10-30-45.csv`
+Files are automatically named with EST timestamps:
+- Format: `{type}_{YYYY-MM-DD_HH-mm-ss_EST}.{ext}`
+- Example: `imu_derived_motion_2024-01-15_10-30-45_EST.csv`
+- Example: `raw_audio_stereo_2024-01-15_10-30-45_EST.wav`
+- Timezone: Eastern Standard Time (EST) for consistent temporal reference
 
 ## Automatic Upload
 
