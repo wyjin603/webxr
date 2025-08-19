@@ -244,11 +244,8 @@
                 this.chirpPlaybackContext = null;
                 this.chirpLoadPromise = null;
                 
-                // Raw PCM audio capture system
-                this.rawAudioSamples = {
-                    left: [],   // Left channel samples
-                    right: []   // Right channel samples
-                };
+                // Raw PCM audio capture system - ALWAYS initialize as object
+                this.initializeAudioSamples();
                 this.audioChannelCount = 2; // Default to stereo
                 this.audioWorkletNode = null;
                 this.useAudioWorklet = true; // Try AudioWorklet first, fallback to ScriptProcessor
@@ -369,16 +366,17 @@
                 window.debugAudioState = () => {
                     console.log('=== Audio Debug State ===');
                     console.log('audioContext:', this.audioContext);
-                    console.log('rawAudioSamples:', this.rawAudioSamples);
                     console.log('audioChannelCount:', this.audioChannelCount);
                     console.log('useAudioWorklet:', this.useAudioWorklet);
                     console.log('audioWorkletNode:', this.audioWorkletNode);
                     console.log('scriptProcessor:', this.scriptProcessor);
                     
-                    if (this.rawAudioSamples) {
-                        console.log('Left samples:', this.rawAudioSamples.left ? this.rawAudioSamples.left.length : 'undefined');
-                        console.log('Right samples:', this.rawAudioSamples.right ? this.rawAudioSamples.right.length : 'undefined');
-                    }
+                    // Validate and check audio samples
+                    const isValid = this.validateAudioSamples();
+                    console.log('Audio samples validation:', isValid);
+                    console.log('rawAudioSamples structure:', this.rawAudioSamples);
+                    console.log('Left samples count:', this.rawAudioSamples.left.length);
+                    console.log('Right samples count:', this.rawAudioSamples.right.length);
                     
                     console.log('=== End Debug ===');
                 };
@@ -797,7 +795,44 @@
                 return { roll, pitch, yaw };
             }
 
+            // Ensure audio samples are always properly initialized
+            initializeAudioSamples() {
+                console.log('Initializing audio samples structure...');
+                this.rawAudioSamples = {
+                    left: [],
+                    right: []
+                };
+                console.log('Audio samples initialized:', this.rawAudioSamples);
+            }
+
+            // Validate audio samples structure
+            validateAudioSamples() {
+                if (!this.rawAudioSamples) {
+                    console.warn('rawAudioSamples is null/undefined, reinitializing...');
+                    this.initializeAudioSamples();
+                    return false;
+                }
+                
+                if (!this.rawAudioSamples.left) {
+                    console.warn('rawAudioSamples.left is undefined, reinitializing...');
+                    this.initializeAudioSamples();
+                    return false;
+                }
+                
+                if (!this.rawAudioSamples.right) {
+                    console.warn('rawAudioSamples.right is undefined, reinitializing...');
+                    this.initializeAudioSamples();
+                    return false;
+                }
+                
+                return true;
+            }
+
             toggleAudio() {
+                console.log('toggleAudio called');
+                // Ensure audio samples are always properly initialized
+                this.validateAudioSamples();
+                
                 if (this.audioContext && this.audioContext.state !== 'closed') {
                     this.stopAudio();
                 } else {
@@ -962,11 +997,9 @@
 
             async initializeRawAudioCapture(sourceNode) {
                 try {
-                    // Clear previous samples (ensure stereo structure)
-                    this.rawAudioSamples = {
-                        left: [],
-                        right: []
-                    };
+                    console.log('Initializing raw audio capture...');
+                    // Ensure proper audio samples initialization
+                    this.initializeAudioSamples();
                     
                     // Try AudioWorklet first (modern approach)
                     if (this.useAudioWorklet && this.audioContext.audioWorklet) {
@@ -1003,20 +1036,15 @@
                             
                         case 'audioChunk':
                             // Accumulate audio chunks (stereo)
+                            this.validateAudioSamples(); // Ensure structure exists
+                            
                             if (samplesLeft && samplesRight && samplesLeft.length > 0) {
-                                // Ensure rawAudioSamples is properly initialized
-                                if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
-                                    this.rawAudioSamples = { left: [], right: [] };
-                                }
                                 this.rawAudioSamples.left.push(...samplesLeft);
                                 this.rawAudioSamples.right.push(...samplesRight);
                                 console.log('AudioWorklet stereo chunk received:', samplesLeft.length, 'samples per channel, total L/R:', 
                                     this.rawAudioSamples.left.length, '/', this.rawAudioSamples.right.length);
                             } else if (samples && samples.length > 0) {
                                 // Fallback for mono
-                                if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
-                                    this.rawAudioSamples = { left: [], right: [] };
-                                }
                                 this.rawAudioSamples.left.push(...samples);
                                 this.rawAudioSamples.right.push(...samples);
                                 console.log('AudioWorklet mono chunk received:', samples.length, 'samples, duplicated to stereo');
@@ -1027,19 +1055,14 @@
                             
                         case 'recordingStopped':
                             // Final samples (stereo)
+                            this.validateAudioSamples(); // Ensure structure exists
+                            
                             if (samplesLeft && samplesRight && samplesLeft.length > 0) {
-                                // Ensure rawAudioSamples is properly initialized
-                                if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
-                                    this.rawAudioSamples = { left: [], right: [] };
-                                }
                                 this.rawAudioSamples.left.push(...samplesLeft);
                                 this.rawAudioSamples.right.push(...samplesRight);
                                 console.log(`Raw PCM recording completed: ${this.rawAudioSamples.left.length} samples per channel, ${duration.toFixed(2)}s`);
                             } else if (samples && samples.length > 0) {
                                 // Fallback for mono
-                                if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
-                                    this.rawAudioSamples = { left: [], right: [] };
-                                }
                                 this.rawAudioSamples.left.push(...samples);
                                 this.rawAudioSamples.right.push(...samples);
                                 console.log(`Raw PCM recording completed (mono): ${samples.length} samples, ${duration.toFixed(2)}s`);
@@ -1073,10 +1096,8 @@
                 this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
                 
                 this.scriptProcessor.onaudioprocess = (event) => {
-                    // Ensure rawAudioSamples is properly initialized
-                    if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
-                        this.rawAudioSamples = { left: [], right: [] };
-                    }
+                    // Ensure audio samples are valid
+                    this.validateAudioSamples();
                     
                     const inputBuffer = event.inputBuffer;
                     const leftChannel = inputBuffer.getChannelData(0);
@@ -1196,9 +1217,10 @@
                 
                 this.startAudioBtn.textContent = 'Start Audio Analysis';
                 
-                // Safe access to audio samples with fallbacks
-                const leftSampleCount = (this.rawAudioSamples && this.rawAudioSamples.left) ? this.rawAudioSamples.left.length : 0;
-                const rightSampleCount = (this.rawAudioSamples && this.rawAudioSamples.right) ? this.rawAudioSamples.right.length : 0;
+                // Validate and get audio samples
+                this.validateAudioSamples();
+                const leftSampleCount = this.rawAudioSamples.left.length;
+                const rightSampleCount = this.rawAudioSamples.right.length;
                 const duration = leftSampleCount / 48000; // Assuming 48kHz
                 
                 this.updateStatus(`Raw PCM stereo recording stopped: ${leftSampleCount} samples per channel (${duration.toFixed(2)}s)`, 'warning');
@@ -1238,9 +1260,10 @@
                 const audioElement = document.getElementById('audio-data');
                 const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
                 
-                // Safe access to audio samples with fallbacks
-                const leftSamples = (this.rawAudioSamples && this.rawAudioSamples.left) ? this.rawAudioSamples.left.length : 0;
-                const rightSamples = (this.rawAudioSamples && this.rawAudioSamples.right) ? this.rawAudioSamples.right.length : 0;
+                // Validate and get audio samples
+                this.validateAudioSamples();
+                const leftSamples = this.rawAudioSamples.left.length;
+                const rightSamples = this.rawAudioSamples.right.length;
                 const duration = leftSamples / sampleRate;
                 
                 audioElement.innerHTML = `
@@ -1265,9 +1288,10 @@
                     ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
                 
                 const dataRate = this.xrPoseData.length / Math.max(duration, 1);
-                // Safe access to audio samples with fallbacks
-                const leftAudioSamples = (this.rawAudioSamples && this.rawAudioSamples.left) ? this.rawAudioSamples.left.length : 0;
-                const rightAudioSamples = (this.rawAudioSamples && this.rawAudioSamples.right) ? this.rawAudioSamples.right.length : 0;
+                // Validate and get audio samples
+                this.validateAudioSamples();
+                const leftAudioSamples = this.rawAudioSamples.left.length;
+                const rightAudioSamples = this.rawAudioSamples.right.length;
                 const audioSize = leftAudioSamples / (this.audioContext ? this.audioContext.sampleRate : 48000);
                 
                 statsElement.innerHTML = `
@@ -1503,7 +1527,8 @@
                     }
                     
                     // 5. Export Raw PCM Audio as Stereo WAV file
-                    if (this.rawAudioSamples && this.rawAudioSamples.left && this.rawAudioSamples.left.length > 0) {
+                    this.validateAudioSamples(); // Ensure structure exists
+                    if (this.rawAudioSamples.left.length > 0) {
                         console.log('Exporting raw PCM stereo audio...', {
                             leftSampleCount: this.rawAudioSamples.left.length,
                             rightSampleCount: this.rawAudioSamples.right.length,
@@ -2063,10 +2088,7 @@
                 this.audioData = [];
                 this.audioChunks = [];
                 this.rawAudioBuffer = [];
-                this.rawAudioSamples = {
-                    left: [],
-                    right: []
-                }; // Clear raw PCM samples
+                this.initializeAudioSamples(); // Clear raw PCM samples
                 
                 // Clear comprehensive XR data
                 this.xrPoseData = [];
