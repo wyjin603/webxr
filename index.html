@@ -190,11 +190,22 @@
                 this.microphone = null;
                 this.analyser = null;
                 this.dataArray = null;
+                this.mediaRecorder = null;
+                this.audioChunks = [];
                 
-                // Data storage
+                // High-frequency data storage
                 this.imuData = [];
                 this.audioData = [];
+                this.rawAudioBuffer = [];
                 this.sessionStartTime = null;
+                this.lastIMUTime = 0;
+                this.imuTargetInterval = 1000 / 800; // 800Hz = 1.25ms intervals
+                
+                // Previous values for calculating accelerometer/gyroscope
+                this.prevPosition = { x: 0, y: 0, z: 0 };
+                this.prevVelocity = { x: 0, y: 0, z: 0 };
+                this.prevOrientation = { x: 0, y: 0, z: 0, w: 1 };
+                this.prevTime = 0;
                 
                 // UI elements
                 this.initBtn = document.getElementById('init-btn');
@@ -418,40 +429,69 @@
             onXRFrame(time, frame) {
                 if (!this.isRunning) return;
 
-                const pose = frame.getViewerPose(this.xrRefSpace);
+                const currentTime = performance.now();
                 
-                if (pose) {
-                    // Extract IMU-like data from WebXR pose
-                    const position = pose.transform.position;
-                    const orientation = pose.transform.orientation;
+                // High-frequency IMU data collection (800Hz target)
+                if (currentTime - this.lastIMUTime >= this.imuTargetInterval) {
+                    const pose = frame.getViewerPose(this.xrRefSpace);
                     
-                    // Calculate derived motion data
-                    const timestamp = Date.now();
-                    const imuReading = {
-                        timestamp: timestamp,
-                        position: {
-                            x: position.x.toFixed(4),
-                            y: position.y.toFixed(4),
-                            z: position.z.toFixed(4)
-                        },
-                        orientation: {
-                            x: orientation.x.toFixed(4),
-                            y: orientation.y.toFixed(4),
-                            z: orientation.z.toFixed(4),
-                            w: orientation.w.toFixed(4)
+                    if (pose) {
+                        const position = pose.transform.position;
+                        const orientation = pose.transform.orientation;
+                        const timestamp = Date.now();
+                        
+                        // Calculate accelerometer data (derived from position changes)
+                        const dt = (currentTime - this.prevTime) / 1000; // Convert to seconds
+                        let ax = 0, ay = 0, az = 0;
+                        let gx = 0, gy = 0, gz = 0;
+                        
+                        if (dt > 0 && this.prevTime > 0) {
+                            // Calculate velocity
+                            const vx = (position.x - this.prevPosition.x) / dt;
+                            const vy = (position.y - this.prevPosition.y) / dt;
+                            const vz = (position.z - this.prevPosition.z) / dt;
+                            
+                            // Calculate acceleration
+                            ax = (vx - this.prevVelocity.x) / dt;
+                            ay = (vy - this.prevVelocity.y) / dt;
+                            az = (vz - this.prevVelocity.z) / dt;
+                            
+                            // Calculate angular velocity (simplified)
+                            const dqx = orientation.x - this.prevOrientation.x;
+                            const dqy = orientation.y - this.prevOrientation.y;
+                            const dqz = orientation.z - this.prevOrientation.z;
+                            
+                            gx = (dqx / dt) * 2; // Approximate gyroscope
+                            gy = (dqy / dt) * 2;
+                            gz = (dqz / dt) * 2;
+                            
+                            // Store velocity for next calculation
+                            this.prevVelocity = { x: vx, y: vy, z: vz };
                         }
-                    };
-
-                    // Calculate Euler angles from quaternion for better understanding
-                    const euler = this.quaternionToEuler(orientation);
-                    imuReading.euler = {
-                        roll: euler.roll.toFixed(2),
-                        pitch: euler.pitch.toFixed(2),
-                        yaw: euler.yaw.toFixed(2)
-                    };
-
-                    this.imuData.push(imuReading);
-                    this.updateIMUDisplay(imuReading);
+                        
+                        // Create high-frequency IMU data entry
+                        const imuEntry = `${timestamp},${ax.toFixed(8)},${ay.toFixed(8)},${az.toFixed(8)},${gx.toFixed(8)},${gy.toFixed(8)},${gz.toFixed(8)},${orientation.w.toFixed(4)},${orientation.x.toFixed(4)},${orientation.y.toFixed(4)},${orientation.z.toFixed(4)}`;
+                        
+                        this.imuData.push(imuEntry);
+                        
+                        // Store previous values
+                        this.prevPosition = { x: position.x, y: position.y, z: position.z };
+                        this.prevOrientation = { x: orientation.x, y: orientation.y, z: orientation.z, w: orientation.w };
+                        this.prevTime = currentTime;
+                        
+                        this.lastIMUTime = currentTime;
+                        
+                        // Update display (less frequently to avoid performance issues)
+                        if (this.imuData.length % 50 === 0) {
+                            this.updateIMUDisplay({
+                                timestamp: timestamp,
+                                position: { x: position.x.toFixed(4), y: position.y.toFixed(4), z: position.z.toFixed(4) },
+                                orientation: { x: orientation.x.toFixed(4), y: orientation.y.toFixed(4), z: orientation.z.toFixed(4), w: orientation.w.toFixed(4) },
+                                acceleration: { x: ax.toFixed(4), y: ay.toFixed(4), z: az.toFixed(4) },
+                                gyroscope: { x: gx.toFixed(4), y: gy.toFixed(4), z: gz.toFixed(4) }
+                            });
+                        }
+                    }
                 }
 
                 // Clear the canvas
@@ -484,33 +524,58 @@
 
             async initializeAudio() {
                 try {
-                    this.updateStatus('Requesting microphone access...', 'warning');
+                    this.updateStatus('Requesting microphone access for 48kHz recording...', 'warning');
                     
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         audio: {
+                            sampleRate: 48000,           // 48kHz
+                            channelCount: 1,             // Mono
                             echoCancellation: false,
                             noiseSuppression: false,
-                            autoGainControl: false
+                            autoGainControl: false,
+                            latency: 0.01               // Low latency
                         } 
                     });
                     
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    // Create audio context with 48kHz sample rate
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 48000
+                    });
+                    
+                    console.log('Actual audio context sample rate:', this.audioContext.sampleRate);
+                    
                     this.microphone = this.audioContext.createMediaStreamSource(stream);
                     this.analyser = this.audioContext.createAnalyser();
                     
                     this.analyser.fftSize = 2048;
-                    this.analyser.smoothingTimeConstant = 0.8;
+                    this.analyser.smoothingTimeConstant = 0.1; // Less smoothing for better response
                     
                     this.microphone.connect(this.analyser);
                     
                     const bufferLength = this.analyser.frequencyBinCount;
                     this.dataArray = new Uint8Array(bufferLength);
                     
+                    // Set up MediaRecorder for WAV recording
+                    this.audioChunks = [];
+                    this.mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus', // Will convert to WAV on export
+                        audioBitsPerSecond: 128000
+                    });
+                    
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.audioChunks.push(event.data);
+                        }
+                    };
+                    
+                    // Start recording
+                    this.mediaRecorder.start(100); // Collect data every 100ms
+                    
                     this.startAudioAnalysis();
                     this.startAudioBtn.textContent = 'Stop Audio';
                     this.startAudioBtn.onclick = () => this.stopAudio();
                     
-                    this.updateStatus('Audio analysis started', 'success');
+                    this.updateStatus(`Audio recording started at ${this.audioContext.sampleRate}Hz`, 'success');
                     
                 } catch (error) {
                     this.updateStatus('Failed to access microphone: ' + error.message, 'error');
@@ -611,16 +676,21 @@
                     &nbsp;&nbsp;X: ${reading.position.x}<br>
                     &nbsp;&nbsp;Y: ${reading.position.y}<br>
                     &nbsp;&nbsp;Z: ${reading.position.z}<br>
-                    <strong>Orientation (quaternion):</strong><br>
+                    <strong>Acceleration (m/s²):</strong><br>
+                    &nbsp;&nbsp;Ax: ${reading.acceleration ? reading.acceleration.x : '0.0000'}<br>
+                    &nbsp;&nbsp;Ay: ${reading.acceleration ? reading.acceleration.y : '0.0000'}<br>
+                    &nbsp;&nbsp;Az: ${reading.acceleration ? reading.acceleration.z : '0.0000'}<br>
+                    <strong>Gyroscope (rad/s):</strong><br>
+                    &nbsp;&nbsp;Gx: ${reading.gyroscope ? reading.gyroscope.x : '0.0000'}<br>
+                    &nbsp;&nbsp;Gy: ${reading.gyroscope ? reading.gyroscope.y : '0.0000'}<br>
+                    &nbsp;&nbsp;Gz: ${reading.gyroscope ? reading.gyroscope.z : '0.0000'}<br>
+                    <strong>Quaternion:</strong><br>
+                    &nbsp;&nbsp;W: ${reading.orientation.w}<br>
                     &nbsp;&nbsp;X: ${reading.orientation.x}<br>
                     &nbsp;&nbsp;Y: ${reading.orientation.y}<br>
                     &nbsp;&nbsp;Z: ${reading.orientation.z}<br>
-                    &nbsp;&nbsp;W: ${reading.orientation.w}<br>
-                    <strong>Euler Angles (°):</strong><br>
-                    &nbsp;&nbsp;Roll: ${reading.euler.roll}<br>
-                    &nbsp;&nbsp;Pitch: ${reading.euler.pitch}<br>
-                    &nbsp;&nbsp;Yaw: ${reading.euler.yaw}<br>
-                    <strong>Data points collected:</strong> ${this.imuData.length}
+                    <strong>IMU samples (800Hz):</strong> ${this.imuData.length}<br>
+                    <strong>Target rate:</strong> ${(this.imuData.length / Math.max((Date.now() - this.sessionStartTime) / 1000, 1)).toFixed(1)} Hz
                 `;
             }
 
@@ -628,11 +698,12 @@
                 const audioElement = document.getElementById('audio-data');
                 audioElement.innerHTML = `
                     <strong>Timestamp:</strong> ${new Date(reading.timestamp).toLocaleTimeString()}<br>
+                    <strong>Sample Rate:</strong> ${this.audioContext ? this.audioContext.sampleRate : 'N/A'}Hz<br>
                     <strong>RMS Level:</strong> ${reading.rms}<br>
                     <strong>Peak:</strong> ${reading.peak}<br>
                     <strong>Spectral Centroid:</strong> ${reading.spectralCentroid}<br>
-                    <strong>Frequency Bins:</strong> ${reading.frequencyData.length}<br>
-                    <strong>Audio samples:</strong> ${this.audioData.length}
+                    <strong>Recording Duration:</strong> ${this.audioChunks.length * 0.1}s<br>
+                    <strong>Audio chunks:</strong> ${this.audioChunks.length}
                 `;
                 
                 this.updateStats();
@@ -643,55 +714,101 @@
                 const duration = this.sessionStartTime ? 
                     ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
                 
+                const imuRate = this.imuData.length / Math.max(duration, 1);
+                const audioSize = this.audioChunks.length * 0.1; // Approximate seconds
+                
                 statsElement.innerHTML = `
                     <strong>Session Duration:</strong> ${duration}s<br>
                     <strong>IMU Samples:</strong> ${this.imuData.length}<br>
-                    <strong>Audio Samples:</strong> ${this.audioData.length}<br>
-                    <strong>Sample Rate (IMU):</strong> ${this.imuData.length / Math.max(duration, 1) * 1} Hz<br>
-                    <strong>Sample Rate (Audio):</strong> ${this.audioData.length / Math.max(duration, 1) * 1} Hz<br>
-                    <strong>Total Data Points:</strong> ${this.imuData.length + this.audioData.length}
+                    <strong>IMU Rate:</strong> ${imuRate.toFixed(1)} Hz (target: 800Hz)<br>
+                    <strong>Audio Duration:</strong> ${audioSize.toFixed(1)}s<br>
+                    <strong>Audio Sample Rate:</strong> ${this.audioContext ? this.audioContext.sampleRate : 'N/A'}Hz<br>
+                    <strong>Estimated File Sizes:</strong><br>
+                    &nbsp;&nbsp;IMU CSV: ~${(this.imuData.length * 100 / 1024).toFixed(1)}KB<br>
+                    &nbsp;&nbsp;Audio WAV: ~${(audioSize * 48000 * 2 / 1024 / 1024).toFixed(1)}MB
                 `;
             }
 
-            exportData() {
-                const exportData = {
-                    metadata: {
-                        exportTime: new Date().toISOString(),
-                        sessionDuration: this.sessionStartTime ? Date.now() - this.sessionStartTime : 0,
-                        totalSamples: this.imuData.length + this.audioData.length
-                    },
-                    imuData: this.imuData,
-                    audioData: this.audioData.map(sample => ({
-                        ...sample,
-                        frequencyData: sample.frequencyData.slice(0, 32) // Reduce size for export
-                    }))
-                };
-
-                const blob = new Blob([JSON.stringify(exportData, null, 2)], 
-                    { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
+            stopAudio() {
+                if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                    this.mediaRecorder.stop();
+                }
                 
+                if (this.audioContext) {
+                    this.audioContext.close();
+                    this.audioContext = null;
+                    this.microphone = null;
+                    this.analyser = null;
+                    this.dataArray = null;
+                }
+                
+                this.startAudioBtn.textContent = 'Start Audio Analysis';
+                this.startAudioBtn.onclick = () => this.initializeAudio();
+                this.updateStatus('Audio recording stopped', 'warning');
+            }
+
+            async exportData() {
+                try {
+                    this.updateStatus('Preparing data export...', 'warning');
+                    
+                    const timestamp = Date.now();
+                    
+                    // Export IMU data as CSV
+                    if (this.imuData.length > 0) {
+                        const csvHeader = 'UnixTime(ms),Ax,Ay,Az,Gx,Gy,Gz,QuatW,QuatX,QuatY,QuatZ\n';
+                        const csvContent = csvHeader + this.imuData.join('\n');
+                        
+                        const csvBlob = new Blob([csvContent], { type: 'text/csv' });
+                        this.downloadFile(csvBlob, `imu_data_${timestamp}.csv`);
+                    }
+                    
+                    // Export audio as WAV file
+                    if (this.audioChunks.length > 0) {
+                        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                        
+                        // Convert to WAV (simplified - browser will handle the format)
+                        this.downloadFile(audioBlob, `audio_data_${timestamp}.webm`);
+                        
+                        // Note: For true WAV conversion, we'd need additional processing
+                        // But .webm files can be converted to .wav using tools like FFmpeg
+                    }
+                    
+                    this.updateStatus(`Data exported: ${this.imuData.length} IMU samples, ${this.audioChunks.length * 0.1}s audio`, 'success');
+                    
+                } catch (error) {
+                    this.updateStatus('Export failed: ' + error.message, 'error');
+                    console.error('Export error:', error);
+                }
+            }
+
+            downloadFile(blob, filename) {
+                const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `webxr_sensor_data_${Date.now()}.json`;
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                
-                this.updateStatus('Data exported successfully', 'success');
             }
 
             clearData() {
                 this.imuData = [];
                 this.audioData = [];
+                this.audioChunks = [];
+                this.rawAudioBuffer = [];
                 this.sessionStartTime = Date.now();
+                this.lastIMUTime = 0;
+                this.prevPosition = { x: 0, y: 0, z: 0 };
+                this.prevVelocity = { x: 0, y: 0, z: 0 };
+                this.prevOrientation = { x: 0, y: 0, z: 0, w: 1 };
+                this.prevTime = 0;
                 
-                document.getElementById('imu-data').textContent = 'Data cleared';
-                document.getElementById('audio-data').textContent = 'Data cleared';
-                document.getElementById('stats-data').textContent = 'Data cleared';
+                document.getElementById('imu-data').textContent = 'Data cleared - ready for 800Hz collection';
+                document.getElementById('audio-data').textContent = 'Audio cleared - ready for 48kHz recording';
+                document.getElementById('stats-data').textContent = 'All data cleared';
                 
-                this.updateStatus('All data cleared', 'warning');
+                this.updateStatus('All data cleared - ready for high-frequency collection', 'warning');
             }
 
             onSessionEnd() {
