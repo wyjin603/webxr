@@ -49,6 +49,18 @@ This directory contains comprehensive data files collected from the WebXR IMU & 
 - **Description**: Direct microphone samples without compression
 - **Note**: If mono input is detected, left channel is duplicated to right channel
 
+### Chirp Timing Log Files (`raw_audio_stereo_*.txt`)
+- **Format**: Plain text, one event per line
+- **Naming**: Same base name as corresponding WAV file with .txt extension
+- **Content**: Recording start time and chirp playback timestamps
+- **Time Format**: Unix timestamp in seconds (decimal)
+- **Example Content**:
+  ```
+  Stereo Recording Started at 1755640584.413
+  FMCW Linear 16-20kHz Playback Started at 1755640587.193
+  FMCW Linear 16-20kHz Playback Started at 1755640589.170
+  ```
+
 ### Session Metadata (`session_metadata_*.json`)
 - **Format**: JSON
 - **Contents**: Session duration, sample counts, device info, exported files list
@@ -100,6 +112,47 @@ print(f"Found {len(peaks)} potential chirp responses")
 
 # Spectral analysis
 freqs, times, spectrogram = signal.spectrogram(audio_float, sample_rate, nperseg=1024)
+
+# Load and process chirp timing log
+timing_file = 'raw_audio_stereo_2024-01-15_10-30-45_EST.txt'
+with open(timing_file, 'r') as f:
+    timing_lines = f.readlines()
+
+# Parse timing events
+recording_start = None
+chirp_times = []
+
+for line in timing_lines:
+    line = line.strip()
+    if 'Recording Started at' in line:
+        recording_start = float(line.split('at ')[1])
+    elif 'Playback Started at' in line:
+        chirp_times.append(float(line.split('at ')[1]))
+
+print(f"Recording started at: {recording_start}")
+print(f"Chirp playback times: {chirp_times}")
+
+# Calculate relative timing (seconds from recording start)
+if recording_start:
+    relative_chirp_times = [(t - recording_start) for t in chirp_times]
+    print(f"Relative chirp times: {relative_chirp_times}")
+    
+    # Convert to sample indices for audio analysis
+    chirp_sample_indices = [int(t * sample_rate) for t in relative_chirp_times]
+    print(f"Chirp sample indices: {chirp_sample_indices}")
+    
+    # Analyze audio around chirp times
+    for i, sample_idx in enumerate(chirp_sample_indices):
+        if 0 <= sample_idx < len(audio_float):
+            # Extract 100ms window around chirp
+            window_samples = int(0.1 * sample_rate)  # 100ms
+            start_idx = max(0, sample_idx - window_samples//2)
+            end_idx = min(len(audio_float), sample_idx + window_samples//2)
+            chirp_window = audio_float[start_idx:end_idx]
+            
+            # Analyze this window
+            chirp_rms = np.sqrt(np.mean(chirp_window**2))
+            print(f"Chirp {i+1} RMS level: {chirp_rms:.4f}")
 ```
 
 ### Processing XR Data

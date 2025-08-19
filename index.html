@@ -250,6 +250,10 @@
                 this.audioWorkletNode = null;
                 this.useAudioWorklet = true; // Try AudioWorklet first, fallback to ScriptProcessor
                 
+                // Chirp timing log for TXT file export
+                this.chirpTimingLog = [];
+                this.audioRecordingStartTime = null;
+                
                 // High-frequency data storage
                 this.imuData = [];
                 this.audioData = [];
@@ -464,6 +468,34 @@
                     
                     // Restore original samples
                     this.rawAudioSamples = originalSamples;
+                };
+                
+                window.testChirpTimingLog = () => {
+                    console.log('Testing chirp timing log...');
+                    
+                    // Clear existing log
+                    this.chirpTimingLog = [];
+                    
+                    // Simulate recording start
+                    const recordingStart = Date.now() / 1000;
+                    this.chirpTimingLog.push(`Stereo Recording Started at ${recordingStart}`);
+                    
+                    // Simulate chirp playbacks
+                    const chirp1 = (Date.now() + 1000) / 1000;
+                    const chirp2 = (Date.now() + 2000) / 1000;
+                    this.chirpTimingLog.push(`FMCW Linear 16-20kHz Playback Started at ${chirp1}`);
+                    this.chirpTimingLog.push(`FMCW Linear 16-20kHz Playback Started at ${chirp2}`);
+                    
+                    console.log('Test chirp timing log:', this.chirpTimingLog);
+                    
+                    // Export as TXT file
+                    const txtContent = this.chirpTimingLog.join('\n');
+                    const txtBlob = new Blob([txtContent], { type: 'text/plain' });
+                    const filename = `test_chirp_timing_${Date.now()}.txt`;
+                    
+                    this.downloadFile(txtBlob, filename);
+                    console.log('Test chirp timing log exported:', filename);
+                    this.updateStatus('Test chirp timing log exported successfully', 'success');
                 };
                 
                 // Force enable export button for testing
@@ -965,6 +997,12 @@
                     this.startAudioAnalysis();
                     this.startAudioBtn.textContent = 'Stop Audio';
                     
+                    // Log the recording start time for chirp timing log
+                    this.audioRecordingStartTime = Date.now();
+                    const recordingStartTimeSeconds = this.audioRecordingStartTime / 1000;
+                    this.chirpTimingLog.push(`Stereo Recording Started at ${recordingStartTimeSeconds}`);
+                    console.log('Audio recording started, logged timestamp:', recordingStartTimeSeconds);
+                    
                     this.updateStatus(`Raw PCM recording started at ${this.audioContext.sampleRate}Hz`, 'success');
                     
                 } catch (error) {
@@ -1380,6 +1418,7 @@
                     <strong>Raw Audio Samples:</strong> ${totalAudioSamples.toLocaleString()} (L:${leftAudioSamples.toLocaleString()}, R:${rightAudioSamples.toLocaleString()})<br>
                     <strong>Audio Duration:</strong> ${audioSize.toFixed(2)}s<br>
                     <strong>Audio Sample Rate:</strong> ${this.audioContext ? this.audioContext.sampleRate : 'N/A'}Hz<br>
+                    <strong>Chirp Events:</strong> ${this.chirpTimingLog ? this.chirpTimingLog.length : 0}<br>
                     <strong>Estimated File Sizes:</strong><br>
                     &nbsp;&nbsp;XR Pose CSV: ~${(this.xrPoseData.length * 80 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Views CSV: ~${(this.xrViewData.length * 100 / 1024).toFixed(1)}KB<br>
@@ -1680,6 +1719,27 @@
                         exportedFiles.push(filename);
                         
                         this.updateStatus(`Stereo WAV file exported: ${filename} (${(wavBlob.size / 1024 / 1024).toFixed(2)}MB)`, 'success');
+                        
+                        // 6. Export Chirp Timing Log as TXT file (same base name as audio file)
+                        if (this.chirpTimingLog.length > 0) {
+                            const txtContent = this.chirpTimingLog.join('\n');
+                            const txtBlob = new Blob([txtContent], { type: 'text/plain' });
+                            const txtFilename = filename.replace('.wav', '.txt'); // Same name as audio file but with .txt extension
+                            
+                            console.log('Exporting chirp timing log...', {
+                                logEntries: this.chirpTimingLog.length,
+                                txtFilename: txtFilename,
+                                content: txtContent
+                            });
+                            
+                            await this.exportToGitHub(txtBlob, txtFilename, 'Chirp timing log with recording start and playback events');
+                            this.downloadFile(txtBlob, txtFilename);
+                            exportedFiles.push(txtFilename);
+                            
+                            console.log(`Chirp timing log exported: ${txtFilename}`);
+                        } else {
+                            console.log('No chirp timing events to export');
+                        }
                     } else {
                         console.warn('No raw audio samples to export');
                         this.updateStatus('No raw audio samples captured for export', 'warning');
@@ -1996,7 +2056,11 @@
                     
                     // Log the chirp playback event with timestamp
                     const chirpTimestamp = Date.now();
-                    console.log('Chirp played at timestamp:', chirpTimestamp);
+                    const chirpTimestampSeconds = chirpTimestamp / 1000;
+                    console.log('Chirp played at timestamp:', chirpTimestamp, 'seconds:', chirpTimestampSeconds);
+                    
+                    // Add to chirp timing log for TXT export
+                    this.chirpTimingLog.push(`FMCW Linear 16-20kHz Playback Started at ${chirpTimestampSeconds}`);
                     
                     // Store chirp event in audio data for analysis
                     if (this.audioData) {
@@ -2179,6 +2243,10 @@
                 this.audioChunks = [];
                 this.rawAudioBuffer = [];
                 this.initializeAudioSamples(); // Clear raw PCM samples
+                
+                // Clear chirp timing log
+                this.chirpTimingLog = [];
+                this.audioRecordingStartTime = null;
                 
                 // Clear comprehensive XR data
                 this.xrPoseData = [];
