@@ -1,0 +1,16 @@
+{
+  "timestamp": 1755639101398,
+  "sessionDuration": 18.898,
+  "imuSamples": 2365,
+  "audioChunks": 0,
+  "sampleRate": 48000,
+  "exportedFiles": [
+    "xr_pose_data_2025-08-19T21-31-41.csv",
+    "xr_eye_views_2025-08-19T21-31-41.csv",
+    "xr_projection_matrices_2025-08-19T21-31-41.csv",
+    "imu_derived_motion_2025-08-19T21-31-41.csv",
+    "raw_audio_pcm_2025-08-19T21-31-41.wav"
+  ],
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/39.3.0.11.46.766180192 Chrome/136.0.7103.177 VR Safari/537.36",
+  "webXRSession": "active"
+}
