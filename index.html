@@ -366,6 +366,23 @@
                     this.toggleWebXR();
                 };
                 
+                window.debugAudioState = () => {
+                    console.log('=== Audio Debug State ===');
+                    console.log('audioContext:', this.audioContext);
+                    console.log('rawAudioSamples:', this.rawAudioSamples);
+                    console.log('audioChannelCount:', this.audioChannelCount);
+                    console.log('useAudioWorklet:', this.useAudioWorklet);
+                    console.log('audioWorkletNode:', this.audioWorkletNode);
+                    console.log('scriptProcessor:', this.scriptProcessor);
+                    
+                    if (this.rawAudioSamples) {
+                        console.log('Left samples:', this.rawAudioSamples.left ? this.rawAudioSamples.left.length : 'undefined');
+                        console.log('Right samples:', this.rawAudioSamples.right ? this.rawAudioSamples.right.length : 'undefined');
+                    }
+                    
+                    console.log('=== End Debug ===');
+                };
+                
                 window.testWAVExport = () => {
                     console.log('Testing stereo WAV export with synthetic audio...');
                     
@@ -792,15 +809,58 @@
                 try {
                     this.updateStatus('Requesting microphone access for 48kHz raw PCM recording...', 'warning');
                     
-                    const stream = await navigator.mediaDevices.getUserMedia({ 
-                        audio: {
-                            sampleRate: 48000,           // 48kHz
-                            channelCount: 2,             // Stereo (dual channel)
-                            echoCancellation: false,
-                            noiseSuppression: false,
-                            autoGainControl: false,
-                            latency: 0.01               // Low latency
-                        } 
+                    // Check if mediaDevices is available
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        throw new Error('getUserMedia is not supported in this browser');
+                    }
+                    
+                    // Request microphone access with fallback options
+                    let stream;
+                    try {
+                        // Try stereo first
+                        stream = await navigator.mediaDevices.getUserMedia({ 
+                            audio: {
+                                sampleRate: 48000,           // 48kHz
+                                channelCount: 2,             // Stereo (dual channel)
+                                echoCancellation: false,
+                                noiseSuppression: false,
+                                autoGainControl: false,
+                                latency: 0.01               // Low latency
+                            } 
+                        });
+                        console.log('Stereo audio access granted');
+                    } catch (stereoError) {
+                        console.warn('Stereo audio failed, trying mono:', stereoError.message);
+                        // Fallback to mono
+                        stream = await navigator.mediaDevices.getUserMedia({ 
+                            audio: {
+                                sampleRate: 48000,
+                                channelCount: 1,             // Mono fallback
+                                echoCancellation: false,
+                                noiseSuppression: false,
+                                autoGainControl: false,
+                                latency: 0.01
+                            } 
+                        });
+                        console.log('Mono audio access granted');
+                        this.audioChannelCount = 1;
+                    }
+                    
+                    if (!stream) {
+                        throw new Error('Failed to get audio stream');
+                    }
+                    
+                    // Validate stream has audio tracks
+                    const audioTracks = stream.getAudioTracks();
+                    if (audioTracks.length === 0) {
+                        throw new Error('No audio tracks found in stream');
+                    }
+                    
+                    console.log('Audio track info:', {
+                        label: audioTracks[0].label,
+                        enabled: audioTracks[0].enabled,
+                        readyState: audioTracks[0].readyState,
+                        settings: audioTracks[0].getSettings()
                     });
                     
                     // Create audio context with 48kHz sample rate
@@ -831,15 +891,82 @@
                     this.updateStatus(`Raw PCM recording started at ${this.audioContext.sampleRate}Hz`, 'success');
                     
                 } catch (error) {
-                    this.updateStatus('Failed to access microphone: ' + error.message, 'error');
-                    console.error('Audio initialization error:', error);
+                    console.error('Audio initialization failed:', error);
+                    
+                    // Provide specific error messages based on error type
+                    let errorMessage = 'Failed to access microphone';
+                    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                        errorMessage = 'Microphone access denied. Please allow microphone permissions and refresh.';
+                    } else if (error.name === 'NotFoundError' || error.name === 'DeviceNotFoundError') {
+                        errorMessage = 'No microphone found. Please connect a microphone and refresh.';
+                    } else if (error.name === 'NotSupportedError') {
+                        errorMessage = 'Microphone not supported in this browser. Try Chrome, Firefox, or Safari.';
+                    } else if (error.name === 'OverconstrainedError') {
+                        errorMessage = 'Microphone constraints too strict. Trying basic access...';
+                        // Try basic audio access
+                        this.tryBasicAudioAccess();
+                        return;
+                    } else {
+                        errorMessage = `Audio error: ${error.message}`;
+                    }
+                    
+                    this.updateStatus(errorMessage, 'error');
+                    
+                    // Reset audio state on failure
+                    this.audioContext = null;
+                    this.microphone = null;
+                    this.analyser = null;
+                    this.startAudioBtn.disabled = false;
+                    this.startAudioBtn.textContent = 'Start Audio Analysis';
+                }
+            }
+
+            async tryBasicAudioAccess() {
+                try {
+                    console.log('Trying basic audio access...');
+                    this.updateStatus('Trying basic microphone access...', 'warning');
+                    
+                    // Very basic audio request
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: true  // No constraints
+                    });
+                    
+                    console.log('Basic audio access granted');
+                    this.audioChannelCount = 1; // Assume mono for basic access
+                    
+                    // Create basic audio context
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    console.log('Basic audio context created with sample rate:', this.audioContext.sampleRate);
+                    
+                    this.microphone = this.audioContext.createMediaStreamSource(stream);
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.analyser.fftSize = 2048;
+                    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                    
+                    this.microphone.connect(this.analyser);
+                    
+                    // Initialize basic raw audio capture
+                    await this.initializeRawAudioCapture(this.microphone);
+                    
+                    this.updateStatus('Basic audio initialized successfully', 'success');
+                    this.startAudioBtn.textContent = 'Stop Audio Analysis';
+                    this.startDataCollection();
+                    
+                } catch (basicError) {
+                    console.error('Basic audio access also failed:', basicError);
+                    this.updateStatus('All audio access attempts failed. Check browser permissions.', 'error');
+                    this.startAudioBtn.disabled = false;
+                    this.startAudioBtn.textContent = 'Start Audio Analysis';
                 }
             }
 
             async initializeRawAudioCapture(sourceNode) {
                 try {
-                    // Clear previous samples
-                    this.rawAudioSamples = [];
+                    // Clear previous samples (ensure stereo structure)
+                    this.rawAudioSamples = {
+                        left: [],
+                        right: []
+                    };
                     
                     // Try AudioWorklet first (modern approach)
                     if (this.useAudioWorklet && this.audioContext.audioWorklet) {
@@ -876,30 +1003,48 @@
                             
                         case 'audioChunk':
                             // Accumulate audio chunks (stereo)
-                            if (samplesLeft && samplesRight) {
+                            if (samplesLeft && samplesRight && samplesLeft.length > 0) {
+                                // Ensure rawAudioSamples is properly initialized
+                                if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
+                                    this.rawAudioSamples = { left: [], right: [] };
+                                }
                                 this.rawAudioSamples.left.push(...samplesLeft);
                                 this.rawAudioSamples.right.push(...samplesRight);
                                 console.log('AudioWorklet stereo chunk received:', samplesLeft.length, 'samples per channel, total L/R:', 
                                     this.rawAudioSamples.left.length, '/', this.rawAudioSamples.right.length);
-                            } else if (samples) {
+                            } else if (samples && samples.length > 0) {
                                 // Fallback for mono
+                                if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
+                                    this.rawAudioSamples = { left: [], right: [] };
+                                }
                                 this.rawAudioSamples.left.push(...samples);
                                 this.rawAudioSamples.right.push(...samples);
                                 console.log('AudioWorklet mono chunk received:', samples.length, 'samples, duplicated to stereo');
+                            } else {
+                                console.warn('AudioWorklet chunk received with no valid samples');
                             }
                             break;
                             
                         case 'recordingStopped':
                             // Final samples (stereo)
-                            if (samplesLeft && samplesRight) {
+                            if (samplesLeft && samplesRight && samplesLeft.length > 0) {
+                                // Ensure rawAudioSamples is properly initialized
+                                if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
+                                    this.rawAudioSamples = { left: [], right: [] };
+                                }
                                 this.rawAudioSamples.left.push(...samplesLeft);
                                 this.rawAudioSamples.right.push(...samplesRight);
                                 console.log(`Raw PCM recording completed: ${this.rawAudioSamples.left.length} samples per channel, ${duration.toFixed(2)}s`);
-                            } else if (samples) {
+                            } else if (samples && samples.length > 0) {
                                 // Fallback for mono
+                                if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
+                                    this.rawAudioSamples = { left: [], right: [] };
+                                }
                                 this.rawAudioSamples.left.push(...samples);
                                 this.rawAudioSamples.right.push(...samples);
                                 console.log(`Raw PCM recording completed (mono): ${samples.length} samples, ${duration.toFixed(2)}s`);
+                            } else {
+                                console.warn('AudioWorklet recording stopped with no valid samples');
                             }
                             break;
                     }
@@ -928,6 +1073,11 @@
                 this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
                 
                 this.scriptProcessor.onaudioprocess = (event) => {
+                    // Ensure rawAudioSamples is properly initialized
+                    if (!this.rawAudioSamples || !this.rawAudioSamples.left) {
+                        this.rawAudioSamples = { left: [], right: [] };
+                    }
+                    
                     const inputBuffer = event.inputBuffer;
                     const leftChannel = inputBuffer.getChannelData(0);
                     const rightChannel = inputBuffer.numberOfChannels > 1 ? 
@@ -1046,8 +1196,9 @@
                 
                 this.startAudioBtn.textContent = 'Start Audio Analysis';
                 
-                const leftSampleCount = this.rawAudioSamples.left.length;
-                const rightSampleCount = this.rawAudioSamples.right.length;
+                // Safe access to audio samples with fallbacks
+                const leftSampleCount = (this.rawAudioSamples && this.rawAudioSamples.left) ? this.rawAudioSamples.left.length : 0;
+                const rightSampleCount = (this.rawAudioSamples && this.rawAudioSamples.right) ? this.rawAudioSamples.right.length : 0;
                 const duration = leftSampleCount / 48000; // Assuming 48kHz
                 
                 this.updateStatus(`Raw PCM stereo recording stopped: ${leftSampleCount} samples per channel (${duration.toFixed(2)}s)`, 'warning');
@@ -1086,8 +1237,10 @@
             updateAudioDisplay(reading) {
                 const audioElement = document.getElementById('audio-data');
                 const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
-                const leftSamples = this.rawAudioSamples.left.length;
-                const rightSamples = this.rawAudioSamples.right.length;
+                
+                // Safe access to audio samples with fallbacks
+                const leftSamples = (this.rawAudioSamples && this.rawAudioSamples.left) ? this.rawAudioSamples.left.length : 0;
+                const rightSamples = (this.rawAudioSamples && this.rawAudioSamples.right) ? this.rawAudioSamples.right.length : 0;
                 const duration = leftSamples / sampleRate;
                 
                 audioElement.innerHTML = `
@@ -1112,8 +1265,9 @@
                     ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
                 
                 const dataRate = this.xrPoseData.length / Math.max(duration, 1);
-                const leftAudioSamples = this.rawAudioSamples.left.length;
-                const rightAudioSamples = this.rawAudioSamples.right.length;
+                // Safe access to audio samples with fallbacks
+                const leftAudioSamples = (this.rawAudioSamples && this.rawAudioSamples.left) ? this.rawAudioSamples.left.length : 0;
+                const rightAudioSamples = (this.rawAudioSamples && this.rawAudioSamples.right) ? this.rawAudioSamples.right.length : 0;
                 const audioSize = leftAudioSamples / (this.audioContext ? this.audioContext.sampleRate : 48000);
                 
                 statsElement.innerHTML = `
@@ -1349,7 +1503,7 @@
                     }
                     
                     // 5. Export Raw PCM Audio as Stereo WAV file
-                    if (this.rawAudioSamples.left.length > 0) {
+                    if (this.rawAudioSamples && this.rawAudioSamples.left && this.rawAudioSamples.left.length > 0) {
                         console.log('Exporting raw PCM stereo audio...', {
                             leftSampleCount: this.rawAudioSamples.left.length,
                             rightSampleCount: this.rawAudioSamples.right.length,
