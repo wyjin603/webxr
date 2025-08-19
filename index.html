@@ -140,6 +140,22 @@
         <div class="header">
             <h1>🚀 WebXR IMU & Acoustic Data Collector</h1>
             <p>Capture motion sensor data and audio analysis in virtual/augmented reality</p>
+            <div id="vr-instructions" class="data-panel" style="display: none; margin-top: 15px;">
+                <h3>🎮 VR Controls</h3>
+                <p><strong>Controller Controls:</strong></p>
+                <ul style="text-align: left; margin: 10px 0;">
+                    <li><strong>Trigger (Primary):</strong> Stop WebXR Session</li>
+                    <li><strong>Grip/Secondary Trigger:</strong> Export Data</li>
+                    <li><strong>Menu Button:</strong> Toggle Audio Recording</li>
+                </ul>
+                <p><strong>Keyboard Shortcuts (VR Fallback):</strong></p>
+                <ul style="text-align: left; margin: 10px 0;">
+                    <li><strong>S:</strong> Stop WebXR Session</li>
+                    <li><strong>E:</strong> Export Data</li>
+                    <li><strong>A:</strong> Toggle Audio Recording</li>
+                    <li><strong>C:</strong> Clear All Data</li>
+                </ul>
+            </div>
         </div>
 
         <div id="status" class="status warning">
@@ -211,6 +227,15 @@
                 this.mediaRecorder = null;
                 this.audioChunks = [];
                 
+                // VR Controller support
+                this.controllers = [];
+                this.vrButtonStates = {
+                    stopPressed: false,
+                    exportPressed: false,
+                    lastStopPress: 0,
+                    lastExportPress: 0
+                };
+                
                 // High-frequency data storage
                 this.imuData = [];
                 this.audioData = [];
@@ -248,6 +273,9 @@
                 
                 // GitHub setup event listeners
                 document.getElementById('save-token-btn').addEventListener('click', () => this.saveGitHubToken());
+                
+                // Keyboard shortcuts for VR
+                document.addEventListener('keydown', (event) => this.handleKeyboardInput(event));
                 
                 // Check if token is already saved
                 this.checkGitHubToken();
@@ -315,7 +343,7 @@
                     let sessionMode = 'inline';  // Start with inline mode (works without VR)
                     let sessionOptions = {
                         requiredFeatures: [],
-                        optionalFeatures: ['local', 'local-floor', 'bounded-floor']
+                        optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking']
                     };
 
                     // Try immersive VR first if available
@@ -362,6 +390,11 @@
                     // Session management
                     this.xrSession.addEventListener('end', () => this.onSessionEnd());
                     
+                    // Set up input sources (controllers)
+                    this.xrSession.addEventListener('inputsourceschange', (event) => {
+                        this.setupControllers(event);
+                    });
+                    
                     this.isRunning = true;
                     this.sessionStartTime = Date.now();
                     this.canvas.style.display = 'block';
@@ -370,6 +403,11 @@
                     this.exportBtn.disabled = false;
                     
                     this.updateStatus(`WebXR session started (${sessionMode} mode)`, 'success');
+                    
+                    // Show VR instructions if in VR mode
+                    if (sessionMode === 'immersive-vr') {
+                        document.getElementById('vr-instructions').style.display = 'block';
+                    }
 
                 } catch (error) {
                     this.updateStatus('WebXR failed: ' + error.message + ' - Try enabling WebXR flags in Chrome', 'error');
@@ -475,6 +513,9 @@
                 if (!this.isRunning) return;
 
                 const currentTime = performance.now();
+                
+                // Handle VR controller input
+                this.handleVRControllers(frame);
                 
                 // High-frequency IMU data collection (800Hz target)
                 if (currentTime - this.lastIMUTime >= this.imuTargetInterval) {
@@ -848,6 +889,7 @@
                     const token = localStorage.getItem('github_token');
                     if (!token) {
                         console.warn('GitHub token not found. Set it with: localStorage.setItem("github_token", "your_token")');
+                        this.updateStatus('GitHub token not configured - only local download available', 'warning');
                         return false;
                     }
                     
@@ -878,10 +920,12 @@
                     
                     if (response.ok) {
                         console.log(`Successfully uploaded ${filename} to GitHub`);
+                        this.updateStatus(`✅ ${filename} uploaded to GitHub successfully`, 'success');
                         return true;
                     } else {
                         const error = await response.json();
                         console.error('GitHub upload failed:', error);
+                        this.updateStatus(`❌ GitHub upload failed: ${error.message || 'Unknown error'}`, 'error');
                         return false;
                     }
                     
@@ -1010,6 +1054,128 @@
                 statusElement.style.fontWeight = 'bold';
             }
 
+            // VR Controller and Input Handling
+            setupControllers(event) {
+                console.log('Input sources changed:', event);
+                this.controllers = [];
+                
+                for (const inputSource of this.xrSession.inputSources) {
+                    if (inputSource.targetRayMode === 'tracked-pointer') {
+                        this.controllers.push(inputSource);
+                        console.log('Added controller:', inputSource.handedness);
+                    }
+                }
+                
+                if (this.controllers.length > 0) {
+                    this.updateStatus(`VR Controllers detected: ${this.controllers.length} - Use triggers to stop/export`, 'success');
+                } else {
+                    this.updateStatus('VR session active - Use keyboard: S=Stop, E=Export, A=Audio toggle', 'warning');
+                }
+            }
+
+            handleVRControllers(frame) {
+                if (!this.xrSession || this.controllers.length === 0) return;
+                
+                const currentTime = Date.now();
+                
+                for (let i = 0; i < this.controllers.length; i++) {
+                    const controller = this.controllers[i];
+                    
+                    if (controller.gamepad) {
+                        const gamepad = controller.gamepad;
+                        
+                        // Primary trigger (index 0) = Stop WebXR
+                        if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
+                            if (!this.vrButtonStates.stopPressed && 
+                                currentTime - this.vrButtonStates.lastStopPress > 500) { // 500ms debounce
+                                
+                                this.vrButtonStates.stopPressed = true;
+                                this.vrButtonStates.lastStopPress = currentTime;
+                                
+                                console.log('VR Controller: Stop WebXR triggered');
+                                this.updateStatus('VR Controller: Stopping WebXR session...', 'warning');
+                                this.stopWebXR();
+                            }
+                        } else {
+                            this.vrButtonStates.stopPressed = false;
+                        }
+                        
+                        // Secondary trigger or grip (index 1 or 4) = Export Data
+                        const exportButton = gamepad.buttons[1] || gamepad.buttons[4];
+                        if (exportButton && exportButton.pressed) {
+                            if (!this.vrButtonStates.exportPressed && 
+                                currentTime - this.vrButtonStates.lastExportPress > 1000) { // 1000ms debounce
+                                
+                                this.vrButtonStates.exportPressed = true;
+                                this.vrButtonStates.lastExportPress = currentTime;
+                                
+                                console.log('VR Controller: Export Data triggered');
+                                this.updateStatus('VR Controller: Exporting data...', 'warning');
+                                this.exportData();
+                            }
+                        } else {
+                            this.vrButtonStates.exportPressed = false;
+                        }
+                        
+                        // Menu button (index 3) = Toggle Audio
+                        if (gamepad.buttons[3] && gamepad.buttons[3].pressed) {
+                            if (currentTime - this.vrButtonStates.lastAudioToggle > 1000) {
+                                this.vrButtonStates.lastAudioToggle = currentTime;
+                                console.log('VR Controller: Audio toggle triggered');
+                                this.toggleAudio();
+                            }
+                        }
+                    }
+                }
+            }
+
+            handleKeyboardInput(event) {
+                // Only handle keyboard in VR mode or when XR session is active
+                if (!this.xrSession) return;
+                
+                const currentTime = Date.now();
+                
+                switch(event.key.toLowerCase()) {
+                    case 's':
+                        if (currentTime - this.vrButtonStates.lastStopPress > 500) {
+                            this.vrButtonStates.lastStopPress = currentTime;
+                            console.log('Keyboard: Stop WebXR triggered');
+                            this.updateStatus('Keyboard: Stopping WebXR session...', 'warning');
+                            this.stopWebXR();
+                            event.preventDefault();
+                        }
+                        break;
+                        
+                    case 'e':
+                        if (currentTime - this.vrButtonStates.lastExportPress > 1000) {
+                            this.vrButtonStates.lastExportPress = currentTime;
+                            console.log('Keyboard: Export Data triggered');
+                            this.updateStatus('Keyboard: Exporting data...', 'warning');
+                            this.exportData();
+                            event.preventDefault();
+                        }
+                        break;
+                        
+                    case 'a':
+                        if (currentTime - (this.vrButtonStates.lastAudioToggle || 0) > 1000) {
+                            this.vrButtonStates.lastAudioToggle = currentTime;
+                            console.log('Keyboard: Audio toggle triggered');
+                            this.toggleAudio();
+                            event.preventDefault();
+                        }
+                        break;
+                        
+                    case 'c':
+                        if (currentTime - (this.vrButtonStates.lastClear || 0) > 1000) {
+                            this.vrButtonStates.lastClear = currentTime;
+                            console.log('Keyboard: Clear data triggered');
+                            this.clearData();
+                            event.preventDefault();
+                        }
+                        break;
+                }
+            }
+
             clearData() {
                 this.imuData = [];
                 this.audioData = [];
@@ -1036,6 +1202,19 @@
                 this.startAudioBtn.disabled = true;
                 this.exportBtn.disabled = true;
                 this.stopAudio();
+                
+                // Hide VR instructions
+                document.getElementById('vr-instructions').style.display = 'none';
+                
+                // Reset controller states
+                this.controllers = [];
+                this.vrButtonStates = {
+                    stopPressed: false,
+                    exportPressed: false,
+                    lastStopPress: 0,
+                    lastExportPress: 0
+                };
+                
                 this.updateStatus('WebXR session ended', 'warning');
             }
 
