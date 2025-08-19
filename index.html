@@ -296,6 +296,48 @@
                 
                 this.initEventListeners();
                 this.checkWebXRSupport();
+                
+                // Final validation to ensure everything is properly set up
+                this.performInitialValidation();
+                
+                console.log('WebXR Data Collector initialized successfully');
+            }
+
+            performInitialValidation() {
+                console.log('Performing initial validation...');
+                
+                // Validate audio samples
+                this.validateAudioSamples();
+                
+                // Log all critical properties
+                console.log('Initial state validation:', {
+                    rawAudioSamples: this.rawAudioSamples,
+                    audioChannelCount: this.audioChannelCount,
+                    sessionStartTime: this.sessionStartTime,
+                    imuData: this.imuData,
+                    audioData: this.audioData
+                });
+                
+                // Test that all required arrays are properly initialized
+                const requiredArrays = [
+                    'imuData', 'audioData', 'xrPoseData', 
+                    'xrViewData', 'xrProjectionData', 'xrRawFrameData'
+                ];
+                
+                for (const arrayName of requiredArrays) {
+                    if (!Array.isArray(this[arrayName])) {
+                        console.error(`${arrayName} is not properly initialized as an array`);
+                        this[arrayName] = [];
+                    }
+                }
+                
+                // Validate audio samples structure specifically
+                if (!this.rawAudioSamples || typeof this.rawAudioSamples !== 'object') {
+                    console.error('rawAudioSamples is not properly initialized as an object');
+                    this.initializeAudioSamples();
+                }
+                
+                console.log('Initial validation complete');
             }
 
             initEventListeners() {
@@ -1257,14 +1299,22 @@
             }
 
             updateAudioDisplay(reading) {
-                const audioElement = document.getElementById('audio-data');
-                const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
-                
-                // Validate and get audio samples
-                this.validateAudioSamples();
-                const leftSamples = this.rawAudioSamples.left.length;
-                const rightSamples = this.rawAudioSamples.right.length;
-                const duration = leftSamples / sampleRate;
+                try {
+                    const audioElement = document.getElementById('audio-data');
+                    const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
+                    
+                    // Validate and get audio samples
+                    this.validateAudioSamples();
+                    const leftSamples = this.rawAudioSamples.left.length;
+                    const rightSamples = this.rawAudioSamples.right.length;
+                    const duration = leftSamples / sampleRate;
+                    
+                    console.log('updateAudioDisplay debug:', {
+                        leftSamples,
+                        rightSamples,
+                        duration,
+                        rawAudioSamples: this.rawAudioSamples
+                    });
                 
                 audioElement.innerHTML = `
                     <strong>Timestamp:</strong> ${new Date(reading.timestamp).toLocaleTimeString()}<br>
@@ -1280,19 +1330,45 @@
                 `;
                 
                 this.updateStats();
+                } catch (error) {
+                    console.error('updateAudioDisplay error:', error);
+                    console.error('Error details:', {
+                        message: error.message,
+                        stack: error.stack,
+                        rawAudioSamples: this.rawAudioSamples,
+                        reading: reading
+                    });
+                    
+                    // Fallback display
+                    const audioElement = document.getElementById('audio-data');
+                    if (audioElement) {
+                        audioElement.innerHTML = `<strong>Audio Display Error:</strong> ${error.message}`;
+                    }
+                }
             }
 
             updateStats() {
-                const statsElement = document.getElementById('stats-data');
-                const duration = this.sessionStartTime ? 
-                    ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
-                
-                const dataRate = this.xrPoseData.length / Math.max(duration, 1);
-                // Validate and get audio samples
-                this.validateAudioSamples();
-                const leftAudioSamples = this.rawAudioSamples.left.length;
-                const rightAudioSamples = this.rawAudioSamples.right.length;
-                const audioSize = leftAudioSamples / (this.audioContext ? this.audioContext.sampleRate : 48000);
+                try {
+                    const statsElement = document.getElementById('stats-data');
+                    const duration = this.sessionStartTime ? 
+                        ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
+                    
+                    const dataRate = this.xrPoseData.length / Math.max(duration, 1);
+                    
+                    // Validate and get audio samples with error handling
+                    this.validateAudioSamples();
+                    const leftAudioSamples = this.rawAudioSamples.left.length;
+                    const rightAudioSamples = this.rawAudioSamples.right.length;
+                    const totalAudioSamples = leftAudioSamples + rightAudioSamples;
+                    const audioSize = leftAudioSamples / (this.audioContext ? this.audioContext.sampleRate : 48000);
+                    
+                    console.log('updateStats debug:', {
+                        leftAudioSamples,
+                        rightAudioSamples,
+                        totalAudioSamples,
+                        audioSize,
+                        rawAudioSamples: this.rawAudioSamples
+                    });
                 
                 statsElement.innerHTML = `
                     <strong>Session Duration:</strong> ${duration}s<br>
@@ -1301,7 +1377,7 @@
                     <strong>XR Projection Matrices:</strong> ${this.xrProjectionData.length}<br>
                     <strong>Derived IMU Samples:</strong> ${this.imuData.length}<br>
                     <strong>Data Rate:</strong> ${dataRate.toFixed(1)} Hz (target: 800Hz)<br>
-                    <strong>Raw Audio Samples:</strong> ${audioSamples.toLocaleString()}<br>
+                    <strong>Raw Audio Samples:</strong> ${totalAudioSamples.toLocaleString()} (L:${leftAudioSamples.toLocaleString()}, R:${rightAudioSamples.toLocaleString()})<br>
                     <strong>Audio Duration:</strong> ${audioSize.toFixed(2)}s<br>
                     <strong>Audio Sample Rate:</strong> ${this.audioContext ? this.audioContext.sampleRate : 'N/A'}Hz<br>
                     <strong>Estimated File Sizes:</strong><br>
@@ -1311,6 +1387,20 @@
                     &nbsp;&nbsp;IMU Motion CSV: ~${(this.imuData.length * 100 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;Stereo Audio WAV: ~${((leftAudioSamples + rightAudioSamples) * 2 / 1024 / 1024).toFixed(1)}MB
                 `;
+                } catch (error) {
+                    console.error('updateStats error:', error);
+                    console.error('Error details:', {
+                        message: error.message,
+                        stack: error.stack,
+                        rawAudioSamples: this.rawAudioSamples
+                    });
+                    
+                    // Fallback display
+                    const statsElement = document.getElementById('stats-data');
+                    if (statsElement) {
+                        statsElement.innerHTML = `<strong>Stats Error:</strong> ${error.message}`;
+                    }
+                }
             }
 
             // WAV File Encoder for Raw PCM Data (Stereo Support)
