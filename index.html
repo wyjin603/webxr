@@ -237,28 +237,68 @@
                 try {
                     this.updateStatus('Initializing WebXR session...', 'warning');
                     
-                    // Try immersive VR first, fallback to inline
-                    let sessionMode = 'immersive-vr';
-                    try {
-                        this.xrSession = await navigator.xr.requestSession(sessionMode, {
-                            requiredFeatures: ['local'],
-                            optionalFeatures: ['bounded-floor', 'hand-tracking']
-                        });
-                    } catch (error) {
-                        sessionMode = 'inline';
-                        this.xrSession = await navigator.xr.requestSession(sessionMode);
+                    // Check WebXR support first
+                    if (!navigator.xr) {
+                        throw new Error('WebXR not supported. Try Chrome/Edge with WebXR flags enabled.');
                     }
 
-                    // Initialize WebGL context
+                    // Initialize WebGL context first
                     this.gl = this.canvas.getContext('webgl', { xrCompatible: true });
-                    await this.gl.makeXRCompatible();
+                    if (!this.gl) {
+                        throw new Error('WebGL not supported');
+                    }
+
+                    // Try to make WebGL XR compatible
+                    try {
+                        await this.gl.makeXRCompatible();
+                    } catch (error) {
+                        console.warn('XR compatibility failed, trying without:', error);
+                    }
+
+                    // Try different session modes with better error handling
+                    let sessionMode = 'inline';  // Start with inline mode (works without VR)
+                    let sessionOptions = {
+                        requiredFeatures: [],
+                        optionalFeatures: ['local', 'local-floor', 'bounded-floor']
+                    };
+
+                    // Try immersive VR first if available
+                    try {
+                        const vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
+                        if (vrSupported) {
+                            sessionMode = 'immersive-vr';
+                            sessionOptions.requiredFeatures = ['local'];
+                            this.updateStatus('VR mode available - trying VR session...', 'warning');
+                        }
+                    } catch (vrError) {
+                        console.log('VR not available, using inline mode');
+                    }
+
+                    // Request the session
+                    try {
+                        this.xrSession = await navigator.xr.requestSession(sessionMode, sessionOptions);
+                    } catch (sessionError) {
+                        // Fallback to basic inline session
+                        sessionMode = 'inline';
+                        this.xrSession = await navigator.xr.requestSession(sessionMode, {
+                            optionalFeatures: ['local']
+                        });
+                    }
 
                     // Create XR layer
                     const layer = new XRWebGLLayer(this.xrSession, this.gl);
                     this.xrSession.updateRenderState({ baseLayer: layer });
 
-                    // Get reference space
-                    this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
+                    // Get reference space with fallback
+                    try {
+                        this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
+                    } catch (refError) {
+                        try {
+                            this.xrRefSpace = await this.xrSession.requestReferenceSpace('viewer');
+                        } catch (viewerError) {
+                            throw new Error('No suitable reference space available');
+                        }
+                    }
 
                     // Start the render loop
                     this.xrSession.requestAnimationFrame((time, frame) => this.onXRFrame(time, frame));
@@ -276,9 +316,103 @@
                     this.updateStatus(`WebXR session started (${sessionMode} mode)`, 'success');
 
                 } catch (error) {
-                    this.updateStatus('Failed to initialize WebXR: ' + error.message, 'error');
+                    this.updateStatus('WebXR failed: ' + error.message + ' - Try enabling WebXR flags in Chrome', 'error');
                     console.error('WebXR initialization error:', error);
+                    
+                    // Offer fallback mode
+                    this.offerFallbackMode();
                 }
+            }
+
+            offerFallbackMode() {
+                this.updateStatus('WebXR unavailable - Click "Start Fallback Mode" for basic sensor simulation', 'warning');
+                this.initBtn.textContent = 'Start Fallback Mode';
+                this.initBtn.onclick = () => this.startFallbackMode();
+            }
+
+            startFallbackMode() {
+                // Simulate sensor data using device orientation if available
+                this.isRunning = true;
+                this.sessionStartTime = Date.now();
+                this.startAudioBtn.disabled = false;
+                this.exportBtn.disabled = false;
+                this.initBtn.textContent = 'Stop Fallback Mode';
+                
+                this.updateStatus('Fallback mode started - using device orientation sensors', 'success');
+                
+                // Try to use device orientation
+                if ('DeviceOrientationEvent' in window) {
+                    this.startDeviceOrientation();
+                } else {
+                    this.startSimulatedSensors();
+                }
+            }
+
+            startDeviceOrientation() {
+                window.addEventListener('deviceorientation', (event) => {
+                    if (!this.isRunning) return;
+                    
+                    const timestamp = Date.now();
+                    const imuReading = {
+                        timestamp: timestamp,
+                        position: {
+                            x: '0.0000',
+                            y: '0.0000', 
+                            z: '0.0000'
+                        },
+                        orientation: {
+                            x: ((event.beta || 0) / 180).toFixed(4),
+                            y: ((event.gamma || 0) / 180).toFixed(4),
+                            z: ((event.alpha || 0) / 360).toFixed(4),
+                            w: '1.0000'
+                        },
+                        euler: {
+                            roll: (event.gamma || 0).toFixed(2),
+                            pitch: (event.beta || 0).toFixed(2),
+                            yaw: (event.alpha || 0).toFixed(2)
+                        }
+                    };
+                    
+                    this.imuData.push(imuReading);
+                    this.updateIMUDisplay(imuReading);
+                });
+            }
+
+            startSimulatedSensors() {
+                // Simulate sensor data for testing
+                let angle = 0;
+                const simulateData = () => {
+                    if (!this.isRunning) return;
+                    
+                    angle += 0.02;
+                    const timestamp = Date.now();
+                    const imuReading = {
+                        timestamp: timestamp,
+                        position: {
+                            x: (Math.sin(angle) * 0.1).toFixed(4),
+                            y: (Math.cos(angle) * 0.05).toFixed(4),
+                            z: '0.0000'
+                        },
+                        orientation: {
+                            x: (Math.sin(angle * 0.5) * 0.1).toFixed(4),
+                            y: (Math.cos(angle * 0.3) * 0.1).toFixed(4),
+                            z: (Math.sin(angle * 0.7) * 0.1).toFixed(4),
+                            w: '0.9950'
+                        },
+                        euler: {
+                            roll: (Math.sin(angle) * 10).toFixed(2),
+                            pitch: (Math.cos(angle) * 5).toFixed(2),
+                            yaw: (angle * 10 % 360).toFixed(2)
+                        }
+                    };
+                    
+                    this.imuData.push(imuReading);
+                    this.updateIMUDisplay(imuReading);
+                    
+                    setTimeout(simulateData, 50); // 20 FPS
+                };
+                
+                simulateData();
             }
 
             onXRFrame(time, frame) {
