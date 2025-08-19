@@ -351,7 +351,7 @@
                 
                 console.log('Event listeners set up successfully');
                 
-                // Add a test function accessible from console
+                // Add test functions accessible from console
                 window.testButtons = () => {
                     console.log('Testing button functionality...');
                     console.log('Button states:', {
@@ -360,6 +360,43 @@
                         audioDisabled: this.startAudioBtn.disabled
                     });
                     this.toggleWebXR();
+                };
+                
+                window.testWAVExport = () => {
+                    console.log('Testing WAV export with synthetic audio...');
+                    
+                    // Generate test audio (1 second of 440Hz tone)
+                    const sampleRate = 48000;
+                    const duration = 1.0; // 1 second
+                    const frequency = 440; // A4 note
+                    const samples = new Float32Array(sampleRate * duration);
+                    
+                    for (let i = 0; i < samples.length; i++) {
+                        samples[i] = Math.sin(2 * Math.PI * frequency * i / sampleRate) * 0.5;
+                    }
+                    
+                    console.log('Generated test samples:', samples.length);
+                    
+                    // Temporarily set raw samples and export
+                    const originalSamples = this.rawAudioSamples;
+                    this.rawAudioSamples = samples;
+                    
+                    // Test WAV encoding
+                    try {
+                        const wavBuffer = this.encodeWAV(samples, sampleRate, 1);
+                        const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+                        const filename = `test_wav_${Date.now()}.wav`;
+                        
+                        this.downloadFile(wavBlob, filename);
+                        console.log('Test WAV export successful!');
+                        this.updateStatus('Test WAV file exported successfully', 'success');
+                    } catch (error) {
+                        console.error('Test WAV export failed:', error);
+                        this.updateStatus('Test WAV export failed: ' + error.message, 'error');
+                    }
+                    
+                    // Restore original samples
+                    this.rawAudioSamples = originalSamples;
                 };
                 
                 // Force enable export button for testing
@@ -829,6 +866,7 @@
                         case 'audioChunk':
                             // Accumulate audio chunks
                             this.rawAudioSamples.push(...samples);
+                            console.log('AudioWorklet chunk received:', samples.length, 'samples, total:', this.rawAudioSamples.length);
                             break;
                             
                         case 'recordingStopped':
@@ -863,7 +901,13 @@
                     const channelData = inputBuffer.getChannelData(0);
                     
                     // Copy samples to our raw buffer
+                    const oldLength = this.rawAudioSamples.length;
                     this.rawAudioSamples.push(...channelData);
+                    
+                    // Log every 100th chunk to avoid spam
+                    if (Math.floor(this.rawAudioSamples.length / 4096) !== Math.floor(oldLength / 4096)) {
+                        console.log('ScriptProcessor samples:', channelData.length, 'new, total:', this.rawAudioSamples.length);
+                    }
                 };
                 
                 // Connect the audio chain
@@ -1052,52 +1096,95 @@
 
             // WAV File Encoder for Raw PCM Data
             encodeWAV(samples, sampleRate = 48000, numChannels = 1) {
+                console.log('WAV Encoder input:', {
+                    samplesType: samples.constructor.name,
+                    samplesLength: samples.length,
+                    sampleRate: sampleRate,
+                    numChannels: numChannels,
+                    firstSample: samples[0],
+                    lastSample: samples[samples.length - 1]
+                });
+                
+                if (!samples || samples.length === 0) {
+                    throw new Error('No audio samples provided to WAV encoder');
+                }
+                
+                if (!(samples instanceof Float32Array) && !Array.isArray(samples)) {
+                    throw new Error('Samples must be Float32Array or regular array');
+                }
+                
                 const length = samples.length;
-                const buffer = new ArrayBuffer(44 + length * 2);
+                const dataSize = length * 2; // 16-bit samples
+                const fileSize = 44 + dataSize;
+                
+                console.log('WAV file structure:', {
+                    headerSize: 44,
+                    dataSize: dataSize,
+                    totalFileSize: fileSize,
+                    expectedDuration: length / sampleRate
+                });
+                
+                const buffer = new ArrayBuffer(fileSize);
                 const view = new DataView(buffer);
                 
-                // WAV file header
+                // Helper function to write strings
                 const writeString = (offset, string) => {
                     for (let i = 0; i < string.length; i++) {
                         view.setUint8(offset + i, string.charCodeAt(i));
                     }
                 };
                 
-                // RIFF identifier
-                writeString(0, 'RIFF');
-                // File length minus 8 bytes
-                view.setUint32(4, 36 + length * 2, true);
-                // RIFF type
-                writeString(8, 'WAVE');
-                // Format chunk identifier
-                writeString(12, 'fmt ');
-                // Format chunk length
-                view.setUint32(16, 16, true);
-                // Sample format (1 = PCM)
-                view.setUint16(20, 1, true);
-                // Channel count
-                view.setUint16(22, numChannels, true);
-                // Sample rate
-                view.setUint32(24, sampleRate, true);
-                // Byte rate (sample rate * block align)
-                view.setUint32(28, sampleRate * numChannels * 2, true);
-                // Block align (channel count * bytes per sample)
-                view.setUint16(32, numChannels * 2, true);
-                // Bits per sample
-                view.setUint16(34, 16, true);
-                // Data chunk identifier
-                writeString(36, 'data');
-                // Data chunk length
-                view.setUint32(40, length * 2, true);
+                // WAV file header (44 bytes total)
+                writeString(0, 'RIFF');                          // Chunk ID
+                view.setUint32(4, fileSize - 8, true);           // Chunk size
+                writeString(8, 'WAVE');                          // Format
+                writeString(12, 'fmt ');                         // Subchunk1 ID
+                view.setUint32(16, 16, true);                    // Subchunk1 size (16 for PCM)
+                view.setUint16(20, 1, true);                     // Audio format (1 = PCM)
+                view.setUint16(22, numChannels, true);           // Number of channels
+                view.setUint32(24, sampleRate, true);            // Sample rate
+                view.setUint32(28, sampleRate * numChannels * 2, true); // Byte rate
+                view.setUint16(32, numChannels * 2, true);       // Block align
+                view.setUint16(34, 16, true);                    // Bits per sample
+                writeString(36, 'data');                         // Subchunk2 ID
+                view.setUint32(40, dataSize, true);              // Subchunk2 size
                 
                 // Convert float samples to 16-bit PCM
                 let offset = 44;
+                let clippedSamples = 0;
+                
                 for (let i = 0; i < length; i++) {
-                    let sample = Math.max(-1, Math.min(1, samples[i]));
-                    sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-                    view.setInt16(offset, sample, true);
+                    let sample = samples[i];
+                    
+                    // Handle NaN or undefined samples
+                    if (isNaN(sample) || sample === undefined || sample === null) {
+                        sample = 0;
+                    }
+                    
+                    // Clamp sample to [-1, 1] range
+                    if (sample > 1) {
+                        sample = 1;
+                        clippedSamples++;
+                    } else if (sample < -1) {
+                        sample = -1;
+                        clippedSamples++;
+                    }
+                    
+                    // Convert to 16-bit signed integer
+                    const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                    view.setInt16(offset, Math.round(intSample), true);
                     offset += 2;
                 }
+                
+                if (clippedSamples > 0) {
+                    console.warn(`WAV encoder: ${clippedSamples} samples were clipped (${(clippedSamples/length*100).toFixed(2)}%)`);
+                }
+                
+                console.log('WAV encoding complete:', {
+                    bufferSize: buffer.byteLength,
+                    expectedSize: fileSize,
+                    clippedSamples: clippedSamples
+                });
                 
                 return buffer;
             }
@@ -1170,18 +1257,57 @@
                     
                     // 5. Export Raw PCM Audio as WAV file
                     if (this.rawAudioSamples.length > 0) {
-                        console.log('Encoding raw PCM samples to WAV...', this.rawAudioSamples.length, 'samples');
+                        console.log('Exporting raw PCM audio...', {
+                            sampleCount: this.rawAudioSamples.length,
+                            dataType: typeof this.rawAudioSamples,
+                            isArray: Array.isArray(this.rawAudioSamples),
+                            firstFewSamples: this.rawAudioSamples.slice(0, 10)
+                        });
                         
                         const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
-                        const wavBuffer = this.encodeWAV(this.rawAudioSamples, sampleRate, 1);
+                        
+                        // Convert to Float32Array if needed
+                        let samplesArray;
+                        if (this.rawAudioSamples instanceof Float32Array) {
+                            samplesArray = this.rawAudioSamples;
+                        } else if (Array.isArray(this.rawAudioSamples)) {
+                            samplesArray = new Float32Array(this.rawAudioSamples);
+                        } else {
+                            console.error('Invalid audio samples format:', typeof this.rawAudioSamples);
+                            this.updateStatus('Error: Invalid audio samples format', 'error');
+                            return;
+                        }
+                        
+                        console.log('Converting to WAV...', {
+                            samplesType: samplesArray.constructor.name,
+                            samplesLength: samplesArray.length,
+                            sampleRate: sampleRate,
+                            duration: samplesArray.length / sampleRate
+                        });
+                        
+                        const wavBuffer = this.encodeWAV(samplesArray, sampleRate, 1);
+                        console.log('WAV buffer created:', {
+                            bufferSize: wavBuffer.byteLength,
+                            bufferSizeMB: (wavBuffer.byteLength / 1024 / 1024).toFixed(2)
+                        });
+                        
                         const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
                         const filename = `raw_audio_pcm_${dateStr}.wav`;
+                        
+                        console.log('Created WAV blob:', {
+                            blobSize: wavBlob.size,
+                            blobType: wavBlob.type,
+                            filename: filename
+                        });
                         
                         await this.exportToGitHub(wavBlob, filename, 'Raw PCM audio data (WAV format)');
                         this.downloadFile(wavBlob, filename);
                         exportedFiles.push(filename);
                         
-                        console.log(`WAV file created: ${filename}, size: ${(wavBuffer.byteLength / 1024 / 1024).toFixed(2)}MB`);
+                        this.updateStatus(`WAV file exported: ${filename} (${(wavBlob.size / 1024 / 1024).toFixed(2)}MB)`, 'success');
+                    } else {
+                        console.warn('No raw audio samples to export');
+                        this.updateStatus('No raw audio samples captured for export', 'warning');
                     }
                     
                     // Export session metadata

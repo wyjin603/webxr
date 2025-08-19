@@ -74,10 +74,11 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
             }
             
             // Periodically send chunks to main thread to avoid memory issues
-            if (this.sampleBuffer.length >= this.bufferSize * 100) { // Send every ~400KB of samples
+            if (this.sampleBuffer.length >= this.bufferSize * 50) { // Send every ~200KB of samples
+                const chunkSize = this.bufferSize * 25; // Send smaller chunks more frequently
                 this.port.postMessage({
                     type: 'audioChunk',
-                    samples: new Float32Array(this.sampleBuffer.splice(0, this.bufferSize * 50)),
+                    samples: new Float32Array(this.sampleBuffer.splice(0, chunkSize)),
                     sampleRate: this.sampleRate
                 });
             }
