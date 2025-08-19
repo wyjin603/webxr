@@ -244,6 +244,11 @@
                 this.chirpPlaybackContext = null;
                 this.chirpLoadPromise = null;
                 
+                // Raw PCM audio capture system
+                this.rawAudioSamples = [];
+                this.audioWorkletNode = null;
+                this.useAudioWorklet = true; // Try AudioWorklet first, fallback to ScriptProcessor
+                
                 // High-frequency data storage
                 this.imuData = [];
                 this.audioData = [];
@@ -738,7 +743,7 @@
 
             async initializeAudio() {
                 try {
-                    this.updateStatus('Requesting microphone access for 48kHz recording...', 'warning');
+                    this.updateStatus('Requesting microphone access for 48kHz raw PCM recording...', 'warning');
                     
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         audio: {
@@ -764,36 +769,108 @@
                     this.analyser.fftSize = 2048;
                     this.analyser.smoothingTimeConstant = 0.1; // Less smoothing for better response
                     
+                    // Connect to analyser for visualization
                     this.microphone.connect(this.analyser);
                     
                     const bufferLength = this.analyser.frequencyBinCount;
                     this.dataArray = new Uint8Array(bufferLength);
                     
-                    // Set up MediaRecorder for WAV recording
-                    this.audioChunks = [];
-                    this.mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus', // Will convert to WAV on export
-                        audioBitsPerSecond: 128000
-                    });
-                    
-                    this.mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) {
-                            this.audioChunks.push(event.data);
-                        }
-                    };
-                    
-                    // Start recording
-                    this.mediaRecorder.start(100); // Collect data every 100ms
+                    // Initialize raw PCM capture
+                    await this.initializeRawAudioCapture(this.microphone);
                     
                     this.startAudioAnalysis();
                     this.startAudioBtn.textContent = 'Stop Audio';
                     
-                    this.updateStatus(`Audio recording started at ${this.audioContext.sampleRate}Hz`, 'success');
+                    this.updateStatus(`Raw PCM recording started at ${this.audioContext.sampleRate}Hz`, 'success');
                     
                 } catch (error) {
                     this.updateStatus('Failed to access microphone: ' + error.message, 'error');
                     console.error('Audio initialization error:', error);
                 }
+            }
+
+            async initializeRawAudioCapture(sourceNode) {
+                try {
+                    // Clear previous samples
+                    this.rawAudioSamples = [];
+                    
+                    // Try AudioWorklet first (modern approach)
+                    if (this.useAudioWorklet && this.audioContext.audioWorklet) {
+                        console.log('Using AudioWorklet for raw PCM capture');
+                        await this.setupAudioWorklet(sourceNode);
+                    } else {
+                        console.log('Using ScriptProcessorNode for raw PCM capture (fallback)');
+                        this.setupScriptProcessor(sourceNode);
+                    }
+                    
+                } catch (error) {
+                    console.error('AudioWorklet failed, falling back to ScriptProcessor:', error);
+                    this.useAudioWorklet = false;
+                    this.setupScriptProcessor(sourceNode);
+                }
+            }
+
+            async setupAudioWorklet(sourceNode) {
+                // Load the AudioWorklet processor
+                await this.audioContext.audioWorklet.addModule('./audio-capture-processor.js');
+                
+                // Create the AudioWorklet node
+                this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'audio-capture-processor');
+                
+                // Handle messages from the processor
+                this.audioWorkletNode.port.onmessage = (event) => {
+                    const { type, samples, sampleRate, duration } = event.data;
+                    
+                    switch (type) {
+                        case 'recordingStarted':
+                            console.log('Raw PCM recording started via AudioWorklet');
+                            break;
+                            
+                        case 'audioChunk':
+                            // Accumulate audio chunks
+                            this.rawAudioSamples.push(...samples);
+                            break;
+                            
+                        case 'recordingStopped':
+                            // Final samples
+                            this.rawAudioSamples.push(...samples);
+                            console.log(`Raw PCM recording completed: ${this.rawAudioSamples.length} samples, ${duration.toFixed(2)}s`);
+                            break;
+                    }
+                };
+                
+                // Connect the audio chain: source -> worklet -> (nowhere, just processing)
+                sourceNode.connect(this.audioWorkletNode);
+                
+                // Start recording
+                this.audioWorkletNode.port.postMessage({
+                    command: 'setSampleRate',
+                    data: { sampleRate: this.audioContext.sampleRate }
+                });
+                
+                this.audioWorkletNode.port.postMessage({
+                    command: 'start'
+                });
+            }
+
+            setupScriptProcessor(sourceNode) {
+                // Fallback to ScriptProcessorNode for older browsers
+                const bufferSize = 4096;
+                this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
+                
+                this.scriptProcessor.onaudioprocess = (event) => {
+                    const inputBuffer = event.inputBuffer;
+                    const channelData = inputBuffer.getChannelData(0);
+                    
+                    // Copy samples to our raw buffer
+                    this.rawAudioSamples.push(...channelData);
+                };
+                
+                // Connect the audio chain
+                sourceNode.connect(this.scriptProcessor);
+                this.scriptProcessor.connect(this.audioContext.destination);
+                
+                console.log('ScriptProcessor setup completed for raw PCM capture');
             }
 
             startAudioAnalysis() {
@@ -868,8 +945,16 @@
             }
 
             stopAudio() {
-                if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-                    this.mediaRecorder.stop();
+                // Stop raw PCM capture
+                if (this.audioWorkletNode) {
+                    this.audioWorkletNode.port.postMessage({ command: 'stop' });
+                    this.audioWorkletNode.disconnect();
+                    this.audioWorkletNode = null;
+                }
+                
+                if (this.scriptProcessor) {
+                    this.scriptProcessor.disconnect();
+                    this.scriptProcessor = null;
                 }
                 
                 if (this.audioContext) {
@@ -881,7 +966,12 @@
                 }
                 
                 this.startAudioBtn.textContent = 'Start Audio Analysis';
-                this.updateStatus('Audio recording stopped', 'warning');
+                
+                const sampleCount = this.rawAudioSamples.length;
+                const duration = sampleCount / 48000; // Assuming 48kHz
+                
+                this.updateStatus(`Raw PCM recording stopped: ${sampleCount} samples (${duration.toFixed(2)}s)`, 'warning');
+                console.log('Raw audio samples captured:', sampleCount);
             }
 
             updateIMUDisplay(reading) {
@@ -915,14 +1005,18 @@
 
             updateAudioDisplay(reading) {
                 const audioElement = document.getElementById('audio-data');
+                const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
+                const duration = this.rawAudioSamples.length / sampleRate;
+                
                 audioElement.innerHTML = `
                     <strong>Timestamp:</strong> ${new Date(reading.timestamp).toLocaleTimeString()}<br>
-                    <strong>Sample Rate:</strong> ${this.audioContext ? this.audioContext.sampleRate : 'N/A'}Hz<br>
+                    <strong>Sample Rate:</strong> ${sampleRate}Hz (Raw PCM)<br>
                     <strong>RMS Level:</strong> ${reading.rms}<br>
                     <strong>Peak:</strong> ${reading.peak}<br>
                     <strong>Spectral Centroid:</strong> ${reading.spectralCentroid}<br>
-                    <strong>Recording Duration:</strong> ${this.audioChunks.length * 0.1}s<br>
-                    <strong>Audio chunks:</strong> ${this.audioChunks.length}
+                    <strong>Raw Samples:</strong> ${this.rawAudioSamples.length.toLocaleString()}<br>
+                    <strong>Recording Duration:</strong> ${duration.toFixed(3)}s<br>
+                    <strong>Capture Method:</strong> ${this.useAudioWorklet && this.audioWorkletNode ? 'AudioWorklet' : 'ScriptProcessor'}
                 `;
                 
                 this.updateStats();
@@ -934,7 +1028,8 @@
                     ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
                 
                 const dataRate = this.xrPoseData.length / Math.max(duration, 1);
-                const audioSize = this.audioChunks.length * 0.1; // Approximate seconds
+                const audioSamples = this.rawAudioSamples.length;
+                const audioSize = audioSamples / (this.audioContext ? this.audioContext.sampleRate : 48000);
                 
                 statsElement.innerHTML = `
                     <strong>Session Duration:</strong> ${duration}s<br>
@@ -943,15 +1038,68 @@
                     <strong>XR Projection Matrices:</strong> ${this.xrProjectionData.length}<br>
                     <strong>Derived IMU Samples:</strong> ${this.imuData.length}<br>
                     <strong>Data Rate:</strong> ${dataRate.toFixed(1)} Hz (target: 800Hz)<br>
-                    <strong>Audio Duration:</strong> ${audioSize.toFixed(1)}s<br>
+                    <strong>Raw Audio Samples:</strong> ${audioSamples.toLocaleString()}<br>
+                    <strong>Audio Duration:</strong> ${audioSize.toFixed(2)}s<br>
                     <strong>Audio Sample Rate:</strong> ${this.audioContext ? this.audioContext.sampleRate : 'N/A'}Hz<br>
                     <strong>Estimated File Sizes:</strong><br>
                     &nbsp;&nbsp;XR Pose CSV: ~${(this.xrPoseData.length * 80 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Views CSV: ~${(this.xrViewData.length * 100 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Projection CSV: ~${(this.xrProjectionData.length * 200 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;IMU Motion CSV: ~${(this.imuData.length * 100 / 1024).toFixed(1)}KB<br>
-                    &nbsp;&nbsp;Audio WebM: ~${(audioSize * 48000 * 2 / 1024 / 1024).toFixed(1)}MB
+                    &nbsp;&nbsp;Raw Audio WAV: ~${(audioSamples * 2 / 1024 / 1024).toFixed(1)}MB
                 `;
+            }
+
+            // WAV File Encoder for Raw PCM Data
+            encodeWAV(samples, sampleRate = 48000, numChannels = 1) {
+                const length = samples.length;
+                const buffer = new ArrayBuffer(44 + length * 2);
+                const view = new DataView(buffer);
+                
+                // WAV file header
+                const writeString = (offset, string) => {
+                    for (let i = 0; i < string.length; i++) {
+                        view.setUint8(offset + i, string.charCodeAt(i));
+                    }
+                };
+                
+                // RIFF identifier
+                writeString(0, 'RIFF');
+                // File length minus 8 bytes
+                view.setUint32(4, 36 + length * 2, true);
+                // RIFF type
+                writeString(8, 'WAVE');
+                // Format chunk identifier
+                writeString(12, 'fmt ');
+                // Format chunk length
+                view.setUint32(16, 16, true);
+                // Sample format (1 = PCM)
+                view.setUint16(20, 1, true);
+                // Channel count
+                view.setUint16(22, numChannels, true);
+                // Sample rate
+                view.setUint32(24, sampleRate, true);
+                // Byte rate (sample rate * block align)
+                view.setUint32(28, sampleRate * numChannels * 2, true);
+                // Block align (channel count * bytes per sample)
+                view.setUint16(32, numChannels * 2, true);
+                // Bits per sample
+                view.setUint16(34, 16, true);
+                // Data chunk identifier
+                writeString(36, 'data');
+                // Data chunk length
+                view.setUint32(40, length * 2, true);
+                
+                // Convert float samples to 16-bit PCM
+                let offset = 44;
+                for (let i = 0; i < length; i++) {
+                    let sample = Math.max(-1, Math.min(1, samples[i]));
+                    sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                    view.setInt16(offset, sample, true);
+                    offset += 2;
+                }
+                
+                return buffer;
             }
 
 
@@ -1020,14 +1168,20 @@
                         exportedFiles.push(filename);
                     }
                     
-                    // Export audio as WebM file
-                    if (this.audioChunks.length > 0) {
-                        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
-                        const filename = `audio_data_${dateStr}.webm`;
+                    // 5. Export Raw PCM Audio as WAV file
+                    if (this.rawAudioSamples.length > 0) {
+                        console.log('Encoding raw PCM samples to WAV...', this.rawAudioSamples.length, 'samples');
                         
-                        await this.exportToGitHub(audioBlob, filename, 'Audio recording data');
-                        this.downloadFile(audioBlob, filename);
+                        const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
+                        const wavBuffer = this.encodeWAV(this.rawAudioSamples, sampleRate, 1);
+                        const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+                        const filename = `raw_audio_pcm_${dateStr}.wav`;
+                        
+                        await this.exportToGitHub(wavBlob, filename, 'Raw PCM audio data (WAV format)');
+                        this.downloadFile(wavBlob, filename);
                         exportedFiles.push(filename);
+                        
+                        console.log(`WAV file created: ${filename}, size: ${(wavBuffer.byteLength / 1024 / 1024).toFixed(2)}MB`);
                     }
                     
                     // Export session metadata
@@ -1523,6 +1677,7 @@
                 this.audioData = [];
                 this.audioChunks = [];
                 this.rawAudioBuffer = [];
+                this.rawAudioSamples = []; // Clear raw PCM samples
                 
                 // Clear comprehensive XR data
                 this.xrPoseData = [];
@@ -1538,10 +1693,10 @@
                 this.prevTime = 0;
                 
                 document.getElementById('imu-data').textContent = 'Data cleared - ready for comprehensive XR data collection';
-                document.getElementById('audio-data').textContent = 'Audio cleared - ready for 48kHz recording';
-                document.getElementById('stats-data').textContent = 'All XR and audio data cleared';
+                document.getElementById('audio-data').textContent = 'Raw PCM audio cleared - ready for 48kHz WAV recording';
+                document.getElementById('stats-data').textContent = 'All XR and raw audio data cleared';
                 
-                this.updateStatus('All XR data cleared - ready for comprehensive collection', 'warning');
+                this.updateStatus('All XR and raw PCM data cleared - ready for comprehensive collection', 'warning');
             }
 
             onSessionEnd() {

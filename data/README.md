@@ -40,11 +40,13 @@ This directory contains comprehensive data files collected from the WebXR IMU & 
   - Gyroscope (Gx, Gy, Gz): rad/s
   - Quaternion (QuatW, QuatX, QuatY, QuatZ): normalized
 
-### Audio Files (`audio_data_*.webm`)
-- **Format**: WebM audio container with Opus codec
+### Raw Audio Files (`raw_audio_pcm_*.wav`)
+- **Format**: Uncompressed WAV (PCM 16-bit)
 - **Sample Rate**: 48kHz
 - **Channels**: Mono (1 channel)
-- **Quality**: 128kbps bitrate
+- **Capture Method**: Raw PCM via AudioWorklet/ScriptProcessor
+- **Quality**: Lossless, full-resolution audio data
+- **Description**: Direct microphone samples without compression
 
 ### Session Metadata (`session_metadata_*.json`)
 - **Format**: JSON
@@ -52,17 +54,43 @@ This directory contains comprehensive data files collected from the WebXR IMU & 
 
 ## Data Processing
 
-### Converting Audio Files
-To convert WebM audio files to WAV format for analysis:
+### Processing Raw Audio Files
+Raw audio files are already in WAV format and ready for analysis:
 
-```bash
-# Using FFmpeg
-ffmpeg -i audio_data_2024-01-15T10-30-45.webm -ar 48000 -ac 1 audio_data_2024-01-15T10-30-45.wav
+```python
+import numpy as np
+import scipy.io.wavfile as wav
+from scipy import signal
 
-# Using Python (requires pydub)
-from pydub import AudioSegment
-audio = AudioSegment.from_file("audio_data_2024-01-15T10-30-45.webm")
-audio.export("audio_data_2024-01-15T10-30-45.wav", format="wav")
+# Load raw WAV file
+sample_rate, audio_data = wav.read('raw_audio_pcm_2024-01-15T10-30-45.wav')
+print(f"Sample rate: {sample_rate}Hz, Duration: {len(audio_data)/sample_rate:.2f}s")
+
+# Convert to float32 for analysis
+audio_float = audio_data.astype(np.float32) / 32768.0
+
+# Analyze chirp responses
+def find_chirp_responses(audio, fs, chirp_freq_range=(16000, 20000)):
+    # Design bandpass filter for chirp frequency range
+    nyq = fs // 2
+    low = chirp_freq_range[0] / nyq
+    high = chirp_freq_range[1] / nyq
+    b, a = signal.butter(6, [low, high], btype='band')
+    
+    # Filter audio
+    filtered = signal.filtfilt(b, a, audio)
+    
+    # Find peaks (potential chirp responses)
+    peaks, _ = signal.find_peaks(np.abs(filtered), height=0.1, distance=fs//10)
+    
+    return peaks, filtered
+
+# Detect chirp responses
+peaks, filtered_audio = find_chirp_responses(audio_float, sample_rate)
+print(f"Found {len(peaks)} potential chirp responses")
+
+# Spectral analysis
+freqs, times, spectrogram = signal.spectrogram(audio_float, sample_rate, nperseg=1024)
 ```
 
 ### Processing XR Data
