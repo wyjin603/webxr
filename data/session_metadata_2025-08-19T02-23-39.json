@@ -1,0 +1,13 @@
+{
+  "timestamp": 1755570219219,
+  "sessionDuration": 56.936,
+  "imuSamples": 5085,
+  "audioChunks": 286,
+  "sampleRate": null,
+  "exportedFiles": [
+    "imu_data_2025-08-19T02-23-39.csv",
+    "audio_data_2025-08-19T02-23-39.webm"
+  ],
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/39.3.0.11.46.766180192 Chrome/136.0.7103.177 VR Safari/537.36",
+  "webXRSession": "active"
+}
