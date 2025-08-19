@@ -260,16 +260,54 @@
                 this.canvas = document.getElementById('xr-canvas');
                 this.gl = null;
                 
+                // Validate UI elements were found
+                console.log('UI Elements found:', {
+                    initBtn: !!this.initBtn,
+                    startAudioBtn: !!this.startAudioBtn,
+                    exportBtn: !!this.exportBtn,
+                    githubSetupBtn: !!this.githubSetupBtn,
+                    clearBtn: !!this.clearBtn,
+                    status: !!this.status,
+                    canvas: !!this.canvas
+                });
+                
                 this.initEventListeners();
                 this.checkWebXRSupport();
             }
 
             initEventListeners() {
-                this.initBtn.addEventListener('click', () => this.toggleWebXR());
-                this.startAudioBtn.addEventListener('click', () => this.toggleAudio());
-                this.exportBtn.addEventListener('click', () => this.exportData());
-                this.githubSetupBtn.addEventListener('click', () => this.toggleGitHubSetup());
-                this.clearBtn.addEventListener('click', () => this.clearData());
+                // Add debug logging to verify event listeners are being attached
+                console.log('Setting up event listeners...');
+                
+                this.initBtn.addEventListener('click', (e) => {
+                    console.log('Init button clicked!', this.isRunning);
+                    e.preventDefault();
+                    this.toggleWebXR();
+                });
+                
+                this.startAudioBtn.addEventListener('click', (e) => {
+                    console.log('Audio button clicked!');
+                    e.preventDefault();
+                    this.toggleAudio();
+                });
+                
+                this.exportBtn.addEventListener('click', (e) => {
+                    console.log('Export button clicked!');
+                    e.preventDefault();
+                    this.exportData();
+                });
+                
+                this.githubSetupBtn.addEventListener('click', (e) => {
+                    console.log('GitHub setup button clicked!');
+                    e.preventDefault();
+                    this.toggleGitHubSetup();
+                });
+                
+                this.clearBtn.addEventListener('click', (e) => {
+                    console.log('Clear button clicked!');
+                    e.preventDefault();
+                    this.clearData();
+                });
                 
                 // GitHub setup event listeners
                 document.getElementById('save-token-btn').addEventListener('click', () => this.saveGitHubToken());
@@ -279,6 +317,23 @@
                 
                 // Check if token is already saved
                 this.checkGitHubToken();
+                
+                console.log('Event listeners set up successfully');
+                
+                // Add a test function accessible from console
+                window.testButtons = () => {
+                    console.log('Testing button functionality...');
+                    console.log('Button states:', {
+                        initDisabled: this.initBtn.disabled,
+                        exportDisabled: this.exportBtn.disabled,
+                        audioDisabled: this.startAudioBtn.disabled
+                    });
+                    this.toggleWebXR();
+                };
+                
+                // Force enable export button for testing
+                this.exportBtn.disabled = false;
+                console.log('Export button force enabled for testing');
             }
 
             async checkWebXRSupport() {
@@ -299,22 +354,36 @@
             }
 
             async toggleWebXR() {
+                console.log('toggleWebXR called, isRunning:', this.isRunning);
+                
                 if (this.isRunning) {
+                    console.log('Stopping WebXR session...');
                     this.stopWebXR();
                     return;
                 }
+                
+                console.log('Starting WebXR session...');
                 await this.initializeWebXR();
             }
 
             stopWebXR() {
+                console.log('stopWebXR called, current state:', {
+                    isRunning: this.isRunning,
+                    hasXRSession: !!this.xrSession
+                });
+                
                 this.isRunning = false;
                 
                 if (this.xrSession) {
+                    console.log('Ending XR session...');
                     this.xrSession.end();
+                } else {
+                    console.log('No XR session to end');
                 }
                 
                 this.onSessionEnd();
                 this.updateStatus('WebXR session stopped', 'warning');
+                console.log('stopWebXR completed');
             }
 
             async initializeWebXR() {
@@ -828,6 +897,13 @@
 
 
             async exportData() {
+                console.log('exportData called, current state:', {
+                    isRunning: this.isRunning,
+                    imuDataLength: this.imuData.length,
+                    audioChunksLength: this.audioChunks.length,
+                    hasXRSession: !!this.xrSession
+                });
+                
                 try {
                     this.updateStatus('Preparing data export...', 'warning');
                     
@@ -1130,9 +1206,9 @@
             }
 
             handleKeyboardInput(event) {
-                // Only handle keyboard in VR mode or when XR session is active
-                if (!this.xrSession) return;
+                console.log('Keyboard input:', event.key, 'XR session active:', !!this.xrSession);
                 
+                // Allow keyboard shortcuts even when not in XR session for debugging
                 const currentTime = Date.now();
                 
                 switch(event.key.toLowerCase()) {
