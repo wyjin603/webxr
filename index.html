@@ -150,7 +150,25 @@
             <button id="init-btn" class="primary-btn">Initialize WebXR</button>
             <button id="start-audio-btn" class="secondary-btn" disabled>Start Audio Analysis</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
+            <button id="github-setup-btn" class="secondary-btn">Setup GitHub</button>
             <button id="clear-btn" class="secondary-btn">Clear Data</button>
+        </div>
+
+        <div id="github-setup" class="data-panel" style="display: none; margin-bottom: 20px;">
+            <h3>🔧 GitHub Configuration</h3>
+            <p>To export data directly to your GitHub repository, you need a Personal Access Token:</p>
+            <ol>
+                <li>Go to <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings → Personal access tokens</a></li>
+                <li>Click "Generate new token (classic)"</li>
+                <li>Give it a name like "WebXR Data Export"</li>
+                <li>Select scope: <strong>repo</strong> (Full control of private repositories)</li>
+                <li>Copy the generated token and paste it below:</li>
+            </ol>
+            <div style="margin: 15px 0;">
+                <input type="password" id="github-token-input" placeholder="Paste your GitHub token here" style="width: 70%; padding: 8px; border-radius: 4px; border: 1px solid #ccc;">
+                <button id="save-token-btn" class="secondary-btn" style="margin-left: 10px;">Save Token</button>
+            </div>
+            <p id="token-status" style="margin-top: 10px;"></p>
         </div>
 
         <canvas id="xr-canvas"></canvas>
@@ -211,6 +229,7 @@
                 this.initBtn = document.getElementById('init-btn');
                 this.startAudioBtn = document.getElementById('start-audio-btn');
                 this.exportBtn = document.getElementById('export-btn');
+                this.githubSetupBtn = document.getElementById('github-setup-btn');
                 this.clearBtn = document.getElementById('clear-btn');
                 this.status = document.getElementById('status');
                 this.canvas = document.getElementById('xr-canvas');
@@ -221,10 +240,17 @@
             }
 
             initEventListeners() {
-                this.initBtn.addEventListener('click', () => this.initializeWebXR());
-                this.startAudioBtn.addEventListener('click', () => this.initializeAudio());
+                this.initBtn.addEventListener('click', () => this.toggleWebXR());
+                this.startAudioBtn.addEventListener('click', () => this.toggleAudio());
                 this.exportBtn.addEventListener('click', () => this.exportData());
+                this.githubSetupBtn.addEventListener('click', () => this.toggleGitHubSetup());
                 this.clearBtn.addEventListener('click', () => this.clearData());
+                
+                // GitHub setup event listeners
+                document.getElementById('save-token-btn').addEventListener('click', () => this.saveGitHubToken());
+                
+                // Check if token is already saved
+                this.checkGitHubToken();
             }
 
             async checkWebXRSupport() {
@@ -242,6 +268,25 @@
                 } catch (error) {
                     this.updateStatus('Error checking WebXR support: ' + error.message, 'error');
                 }
+            }
+
+            async toggleWebXR() {
+                if (this.isRunning) {
+                    this.stopWebXR();
+                    return;
+                }
+                await this.initializeWebXR();
+            }
+
+            stopWebXR() {
+                this.isRunning = false;
+                
+                if (this.xrSession) {
+                    this.xrSession.end();
+                }
+                
+                this.onSessionEnd();
+                this.updateStatus('WebXR session stopped', 'warning');
             }
 
             async initializeWebXR() {
@@ -522,6 +567,14 @@
                 return { roll, pitch, yaw };
             }
 
+            toggleAudio() {
+                if (this.audioContext && this.audioContext.state !== 'closed') {
+                    this.stopAudio();
+                } else {
+                    this.initializeAudio();
+                }
+            }
+
             async initializeAudio() {
                 try {
                     this.updateStatus('Requesting microphone access for 48kHz recording...', 'warning');
@@ -573,7 +626,6 @@
                     
                     this.startAudioAnalysis();
                     this.startAudioBtn.textContent = 'Stop Audio';
-                    this.startAudioBtn.onclick = () => this.stopAudio();
                     
                     this.updateStatus(`Audio recording started at ${this.audioContext.sampleRate}Hz`, 'success');
                     
@@ -655,6 +707,10 @@
             }
 
             stopAudio() {
+                if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                    this.mediaRecorder.stop();
+                }
+                
                 if (this.audioContext) {
                     this.audioContext.close();
                     this.audioContext = null;
@@ -664,8 +720,7 @@
                 }
                 
                 this.startAudioBtn.textContent = 'Start Audio Analysis';
-                this.startAudioBtn.onclick = () => this.initializeAudio();
-                this.updateStatus('Audio analysis stopped', 'warning');
+                this.updateStatus('Audio recording stopped', 'warning');
             }
 
             updateIMUDisplay(reading) {
@@ -729,49 +784,55 @@
                 `;
             }
 
-            stopAudio() {
-                if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-                    this.mediaRecorder.stop();
-                }
-                
-                if (this.audioContext) {
-                    this.audioContext.close();
-                    this.audioContext = null;
-                    this.microphone = null;
-                    this.analyser = null;
-                    this.dataArray = null;
-                }
-                
-                this.startAudioBtn.textContent = 'Start Audio Analysis';
-                this.startAudioBtn.onclick = () => this.initializeAudio();
-                this.updateStatus('Audio recording stopped', 'warning');
-            }
+
 
             async exportData() {
                 try {
                     this.updateStatus('Preparing data export...', 'warning');
                     
                     const timestamp = Date.now();
+                    const dateStr = new Date(timestamp).toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                    
+                    let exportedFiles = [];
                     
                     // Export IMU data as CSV
                     if (this.imuData.length > 0) {
                         const csvHeader = 'UnixTime(ms),Ax,Ay,Az,Gx,Gy,Gz,QuatW,QuatX,QuatY,QuatZ\n';
                         const csvContent = csvHeader + this.imuData.join('\n');
+                        const filename = `imu_data_${dateStr}.csv`;
                         
                         const csvBlob = new Blob([csvContent], { type: 'text/csv' });
-                        this.downloadFile(csvBlob, `imu_data_${timestamp}.csv`);
+                        await this.exportToGitHub(csvBlob, filename, 'IMU sensor data');
+                        this.downloadFile(csvBlob, filename);
+                        exportedFiles.push(filename);
                     }
                     
-                    // Export audio as WAV file
+                    // Export audio as WebM file
                     if (this.audioChunks.length > 0) {
                         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                        const filename = `audio_data_${dateStr}.webm`;
                         
-                        // Convert to WAV (simplified - browser will handle the format)
-                        this.downloadFile(audioBlob, `audio_data_${timestamp}.webm`);
-                        
-                        // Note: For true WAV conversion, we'd need additional processing
-                        // But .webm files can be converted to .wav using tools like FFmpeg
+                        await this.exportToGitHub(audioBlob, filename, 'Audio recording data');
+                        this.downloadFile(audioBlob, filename);
+                        exportedFiles.push(filename);
                     }
+                    
+                    // Export session metadata
+                    const metadata = {
+                        timestamp: timestamp,
+                        sessionDuration: this.sessionStartTime ? (timestamp - this.sessionStartTime) / 1000 : 0,
+                        imuSamples: this.imuData.length,
+                        audioChunks: this.audioChunks.length,
+                        sampleRate: this.audioContext ? this.audioContext.sampleRate : null,
+                        exportedFiles: exportedFiles,
+                        userAgent: navigator.userAgent,
+                        webXRSession: this.xrSession ? 'active' : 'inactive'
+                    };
+                    
+                    const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+                    const metadataFilename = `session_metadata_${dateStr}.json`;
+                    await this.exportToGitHub(metadataBlob, metadataFilename, 'Session metadata');
+                    this.downloadFile(metadataBlob, metadataFilename);
                     
                     this.updateStatus(`Data exported: ${this.imuData.length} IMU samples, ${this.audioChunks.length * 0.1}s audio`, 'success');
                     
@@ -781,15 +842,172 @@
                 }
             }
 
+            async exportToGitHub(blob, filename, description) {
+                try {
+                    // GitHub Personal Access Token (user needs to set this)
+                    const token = localStorage.getItem('github_token');
+                    if (!token) {
+                        console.warn('GitHub token not found. Set it with: localStorage.setItem("github_token", "your_token")');
+                        return false;
+                    }
+                    
+                    // Convert blob to base64
+                    const base64Content = await this.blobToBase64(blob);
+                    const base64Data = base64Content.split(',')[1]; // Remove data URL prefix
+                    
+                    const githubAPI = {
+                        owner: 'wyjin603',
+                        repo: 'webxr',
+                        path: `data/${filename}`,
+                        message: `Add ${description} - ${new Date().toISOString()}`,
+                        content: base64Data
+                    };
+                    
+                    const response = await fetch(`https://api.github.com/repos/${githubAPI.owner}/${githubAPI.repo}/contents/${githubAPI.path}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `token ${token}`,
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/vnd.github.v3+json'
+                        },
+                        body: JSON.stringify({
+                            message: githubAPI.message,
+                            content: githubAPI.content
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        console.log(`Successfully uploaded ${filename} to GitHub`);
+                        return true;
+                    } else {
+                        const error = await response.json();
+                        console.error('GitHub upload failed:', error);
+                        return false;
+                    }
+                    
+                } catch (error) {
+                    console.error('GitHub export error:', error);
+                    return false;
+                }
+            }
+            
+            blobToBase64(blob) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+            }
+
             downloadFile(blob, filename) {
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                // VR-compatible download method
+                if (navigator.xr && this.xrSession && this.xrSession.visibilityState === 'visible') {
+                    // In VR mode, use a different approach
+                    this.showVRDownloadNotification(filename);
+                } else {
+                    // Standard download for desktop/mobile
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }, 100);
+                }
+            }
+            
+            showVRDownloadNotification(filename) {
+                // Show notification in VR that file is being exported to GitHub
+                this.updateStatus(`File ${filename} exported to GitHub (VR mode)`, 'success');
+                
+                // Optionally create a visual notification in 3D space
+                // This would require WebXR rendering code
+                console.log(`VR Export: ${filename} - Check GitHub repository for the file`);
+            }
+
+            toggleGitHubSetup() {
+                const setupPanel = document.getElementById('github-setup');
+                if (setupPanel.style.display === 'none') {
+                    setupPanel.style.display = 'block';
+                    this.githubSetupBtn.textContent = 'Hide GitHub Setup';
+                } else {
+                    setupPanel.style.display = 'none';
+                    this.githubSetupBtn.textContent = 'Setup GitHub';
+                }
+            }
+
+            saveGitHubToken() {
+                const tokenInput = document.getElementById('github-token-input');
+                const token = tokenInput.value.trim();
+                
+                if (!token) {
+                    this.updateTokenStatus('Please enter a valid token', 'error');
+                    return;
+                }
+                
+                // Basic validation - GitHub tokens start with 'ghp_'
+                if (!token.startsWith('ghp_') && !token.startsWith('github_pat_')) {
+                    this.updateTokenStatus('Invalid token format. GitHub tokens start with "ghp_" or "github_pat_"', 'error');
+                    return;
+                }
+                
+                localStorage.setItem('github_token', token);
+                tokenInput.value = '';
+                this.updateTokenStatus('GitHub token saved successfully!', 'success');
+                this.githubSetupBtn.textContent = '✅ GitHub Configured';
+                
+                // Test the token
+                this.testGitHubToken();
+            }
+
+            async testGitHubToken() {
+                try {
+                    const token = localStorage.getItem('github_token');
+                    const response = await fetch('https://api.github.com/user', {
+                        headers: {
+                            'Authorization': `token ${token}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const user = await response.json();
+                        this.updateTokenStatus(`Token valid! Connected as: ${user.login}`, 'success');
+                    } else {
+                        this.updateTokenStatus('Token is invalid or expired', 'error');
+                        localStorage.removeItem('github_token');
+                        this.githubSetupBtn.textContent = 'Setup GitHub';
+                    }
+                } catch (error) {
+                    this.updateTokenStatus('Error testing token: ' + error.message, 'error');
+                }
+            }
+
+            checkGitHubToken() {
+                const token = localStorage.getItem('github_token');
+                if (token) {
+                    this.githubSetupBtn.textContent = '✅ GitHub Configured';
+                    this.updateTokenStatus('GitHub token found. Testing...', 'warning');
+                    this.testGitHubToken();
+                } else {
+                    this.updateTokenStatus('No GitHub token configured. Click "Setup GitHub" to configure.', 'warning');
+                }
+            }
+
+            updateTokenStatus(message, type) {
+                const statusElement = document.getElementById('token-status');
+                statusElement.textContent = message;
+                statusElement.className = `status ${type}`;
+                statusElement.style.margin = '10px 0';
+                statusElement.style.padding = '10px';
+                statusElement.style.borderRadius = '6px';
+                statusElement.style.textAlign = 'center';
+                statusElement.style.fontWeight = 'bold';
             }
 
             clearData() {
