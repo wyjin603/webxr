@@ -510,6 +510,17 @@
                     this.updateStatus('Test chirp timing log exported successfully', 'success');
                 };
                 
+                window.testXRPathLog = () => {
+                    console.log('=== XR Path Log Debug ===');
+                    console.log('xrPathLog array:', this.xrPathLog);
+                    console.log('xrPathLog length:', this.xrPathLog ? this.xrPathLog.length : 'undefined');
+                    console.log('sessionMetadata:', this.xrSessionMetadata);
+                    console.log('First few entries:', this.xrPathLog ? this.xrPathLog.slice(0, 5) : 'no data');
+                    console.log('isRunning:', this.isRunning);
+                    console.log('xrSession:', this.xrSession);
+                    console.log('=== End Debug ===');
+                };
+                
                 // Force enable export button for testing
                 this.exportBtn.disabled = false;
                 console.log('Export button force enabled for testing');
@@ -635,18 +646,19 @@
                             // For local space, we may need to estimate headset height
                             this.xrSessionMetadata.headsetHeightM = 1.7; // Default estimate, will be updated if possible
                         } catch (localError) {
-                            try {
-                                this.xrRefSpace = await this.xrSession.requestReferenceSpace('viewer');
+                        try {
+                            this.xrRefSpace = await this.xrSession.requestReferenceSpace('viewer');
                                 this.xrSessionMetadata.referenceSpaceType = 'viewer';
                                 console.log('Using viewer reference space (fallback)');
-                            } catch (viewerError) {
-                                throw new Error('No suitable reference space available');
+                        } catch (viewerError) {
+                            throw new Error('No suitable reference space available');
                             }
                         }
                     }
                     
                     // Log session metadata
-                    console.log('XR Session Metadata:', this.xrSessionMetadata);
+                    console.log('XR Session Metadata captured:', this.xrSessionMetadata);
+                    console.log('XR Path Log initialized with session ID:', this.xrSessionMetadata.sessionId);
 
                     // Start the render loop
                     this.xrSession.requestAnimationFrame((time, frame) => this.onXRFrame(time, frame));
@@ -799,6 +811,16 @@
                         const pathLogEntry = `${this.xrSessionMetadata.sessionId},pose,${timestamp},${position.x.toFixed(8)},${position.y.toFixed(8)},${position.z.toFixed(8)},${orientation.x.toFixed(8)},${orientation.y.toFixed(8)},${orientation.z.toFixed(8)},${orientation.w.toFixed(8)},${trackingState}`;
                         this.xrPathLog.push(pathLogEntry);
                         
+                        // Debug logging every 100 frames to verify data collection
+                        if (this.xrPathLog.length % 100 === 0) {
+                            console.log('XR Path Log progress:', {
+                                entries: this.xrPathLog.length,
+                                sessionId: this.xrSessionMetadata.sessionId,
+                                trackingState: trackingState,
+                                lastEntry: pathLogEntry
+                            });
+                        }
+                        
                         // 2. Collect XR View Data (eye-specific transforms and projection matrices)
                         if (pose.views && pose.views.length > 0) {
                             for (let i = 0; i < pose.views.length; i++) {
@@ -886,56 +908,76 @@
 
             // Determine XR tracking state from pose data
             determineTrackingState(pose) {
-                if (!pose || !pose.transform) {
-                    return 'lost';
-                }
-                
-                // Check if position and orientation are valid
-                const pos = pose.transform.position;
-                const orient = pose.transform.orientation;
-                
-                // Check for invalid values (NaN, extreme values, etc.)
-                if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z) ||
-                    isNaN(orient.x) || isNaN(orient.y) || isNaN(orient.z) || isNaN(orient.w)) {
-                    return 'lost';
-                }
-                
-                // Check if quaternion is normalized (should be close to 1)
-                const quatMagnitude = Math.sqrt(orient.x * orient.x + orient.y * orient.y + orient.z * orient.z + orient.w * orient.w);
-                if (Math.abs(quatMagnitude - 1.0) > 0.1) {
-                    return 'limited';
-                }
-                
-                // Check for extreme position values that might indicate tracking issues
-                const maxPos = 100; // 100 meters seems like a reasonable maximum
-                if (Math.abs(pos.x) > maxPos || Math.abs(pos.y) > maxPos || Math.abs(pos.z) > maxPos) {
-                    return 'limited';
-                }
-                
-                // Check if tracking was recently lost by comparing with previous frames
-                if (this.xrPathLog.length > 0) {
-                    const lastEntry = this.xrPathLog[this.xrPathLog.length - 1];
-                    const lastParts = lastEntry.split(',');
-                    if (lastParts.length >= 11) {
-                        const lastPosX = parseFloat(lastParts[3]);
-                        const lastPosY = parseFloat(lastParts[4]);
-                        const lastPosZ = parseFloat(lastParts[5]);
-                        
-                        // Check for sudden jumps that might indicate tracking issues
-                        const distance = Math.sqrt(
-                            Math.pow(pos.x - lastPosX, 2) +
-                            Math.pow(pos.y - lastPosY, 2) +
-                            Math.pow(pos.z - lastPosZ, 2)
-                        );
-                        
-                        // If position jumped more than 2 meters in one frame, it's likely limited tracking
-                        if (distance > 2.0) {
-                            return 'limited';
+                try {
+                    if (!pose || !pose.transform) {
+                        console.log('Tracking state: lost (no pose or transform)');
+                        return 'lost';
+                    }
+                    
+                    // Check if position and orientation are valid
+                    const pos = pose.transform.position;
+                    const orient = pose.transform.orientation;
+                    
+                    if (!pos || !orient) {
+                        console.log('Tracking state: lost (no position or orientation)');
+                        return 'lost';
+                    }
+                    
+                    // Check for invalid values (NaN, extreme values, etc.)
+                    if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z) ||
+                        isNaN(orient.x) || isNaN(orient.y) || isNaN(orient.z) || isNaN(orient.w)) {
+                        console.log('Tracking state: lost (NaN values)');
+                        return 'lost';
+                    }
+                    
+                    // Check if quaternion is normalized (should be close to 1)
+                    const quatMagnitude = Math.sqrt(orient.x * orient.x + orient.y * orient.y + orient.z * orient.z + orient.w * orient.w);
+                    if (Math.abs(quatMagnitude - 1.0) > 0.1) {
+                        console.log('Tracking state: limited (unnormalized quaternion:', quatMagnitude, ')');
+                        return 'limited';
+                    }
+                    
+                    // Check for extreme position values that might indicate tracking issues
+                    const maxPos = 100; // 100 meters seems like a reasonable maximum
+                    if (Math.abs(pos.x) > maxPos || Math.abs(pos.y) > maxPos || Math.abs(pos.z) > maxPos) {
+                        console.log('Tracking state: limited (extreme position values)');
+                        return 'limited';
+                    }
+                    
+                    // Check if tracking was recently lost by comparing with previous frames
+                    if (this.xrPathLog && this.xrPathLog.length > 0) {
+                        const lastEntry = this.xrPathLog[this.xrPathLog.length - 1];
+                        const lastParts = lastEntry.split(',');
+                        if (lastParts.length >= 11) {
+                            const lastPosX = parseFloat(lastParts[3]);
+                            const lastPosY = parseFloat(lastParts[4]);
+                            const lastPosZ = parseFloat(lastParts[5]);
+                            
+                            // Check for sudden jumps that might indicate tracking issues
+                            const distance = Math.sqrt(
+                                Math.pow(pos.x - lastPosX, 2) +
+                                Math.pow(pos.y - lastPosY, 2) +
+                                Math.pow(pos.z - lastPosZ, 2)
+                            );
+                            
+                            // If position jumped more than 2 meters in one frame, it's likely limited tracking
+                            if (distance > 2.0) {
+                                console.log('Tracking state: limited (sudden jump:', distance.toFixed(3), 'm)');
+                                return 'limited';
+                            }
                         }
                     }
+                    
+                    // Log normal tracking every 500 frames to avoid spam
+                    if (this.xrPathLog && this.xrPathLog.length % 500 === 0) {
+                        console.log('Tracking state: normal (frame', this.xrPathLog.length, ')');
+                    }
+                    
+                    return 'normal';
+                } catch (error) {
+                    console.error('Error determining tracking state:', error);
+                    return 'lost';
                 }
-                
-                return 'normal';
             }
 
             quaternionToEuler(q) {
@@ -1025,14 +1067,14 @@
                     try {
                         // Try stereo first
                         stream = await navigator.mediaDevices.getUserMedia({ 
-                            audio: {
-                                sampleRate: 48000,           // 48kHz
+                        audio: {
+                            sampleRate: 48000,           // 48kHz
                                 channelCount: 2,             // Stereo (dual channel)
-                                echoCancellation: false,
-                                noiseSuppression: false,
-                                autoGainControl: false,
-                                latency: 0.01               // Low latency
-                            } 
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false,
+                            latency: 0.01               // Low latency
+                        } 
                         });
                         console.log('Stereo audio access granted');
                     } catch (stereoError) {
@@ -1252,8 +1294,8 @@
                 
                 // Connect the audio chain: source -> worklet -> (nowhere, just processing)
                 sourceNode.connect(this.audioWorkletNode);
-                
-                // Start recording
+                    
+                    // Start recording
                 this.audioWorkletNode.port.postMessage({
                     command: 'setSampleRate',
                     data: { 
@@ -1435,7 +1477,7 @@
 
             updateAudioDisplay(reading) {
                 try {
-                    const audioElement = document.getElementById('audio-data');
+                const audioElement = document.getElementById('audio-data');
                     const sampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
                     
                     // Validate and get audio samples
@@ -1484,10 +1526,10 @@
 
             updateStats() {
                 try {
-                    const statsElement = document.getElementById('stats-data');
-                    const duration = this.sessionStartTime ? 
-                        ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
-                    
+                const statsElement = document.getElementById('stats-data');
+                const duration = this.sessionStartTime ? 
+                    ((Date.now() - this.sessionStartTime) / 1000).toFixed(1) : 0;
+                
                     const dataRate = this.xrPoseData.length / Math.max(duration, 1);
                     
                     // Validate and get audio samples with error handling
@@ -1845,7 +1887,13 @@
                     }
                     
                     // 7. Export XR Path Log with comprehensive metadata
-                    if (this.xrPathLog.length > 0) {
+                    console.log('XR Path Log export check:', {
+                        xrPathLogLength: this.xrPathLog ? this.xrPathLog.length : 'undefined',
+                        sessionMetadata: this.xrSessionMetadata,
+                        firstFewEntries: this.xrPathLog ? this.xrPathLog.slice(0, 3) : 'no data'
+                    });
+                    
+                    if (this.xrPathLog && this.xrPathLog.length > 0) {
                         console.log('Exporting XR path log with metadata...', {
                             logEntries: this.xrPathLog.length,
                             sessionMetadata: this.xrSessionMetadata
@@ -1962,16 +2010,16 @@
                     this.showVRDownloadNotification(filename);
                 } else {
                     // Standard download for desktop/mobile
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
                     a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
+                document.body.appendChild(a);
+                a.click();
                     setTimeout(() => {
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
                     }, 100);
                 }
             }
