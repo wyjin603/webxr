@@ -30,6 +30,21 @@ This directory contains comprehensive data files collected from the WebXR IMU & 
 - **Description**: Projection matrices used for stereo rendering calculations
 - **Usage**: Essential for accurate 3D reconstruction and calibration
 
+### XR Path Log Files (`xr_path_log_*.csv`)
+- **Format**: CSV with comprehensive XR tracking metadata and pose data
+- **Session Metadata Header**: `# Session Metadata: sessionId,referenceSpaceType,units,handedness,upAxis,forwardAxis,headsetHeightM`
+- **Columns**: session_id, type, UnixTime(ms), PosX, PosY, PosZ, OrientX, OrientY, OrientZ, OrientW, trackingState
+- **Sample Rate**: Target 800Hz
+- **Description**: Complete XR path reconstruction data with tracking quality indicators
+- **Reference Space**: Prefers `local-floor`, falls back to `local` then `viewer`
+- **Coordinate System**: Right-handed, +Y up, -Z forward (typical WebXR conventions)
+- **Tracking States**: 
+  - `normal`: High-quality tracking with good pose data
+  - `limited`: Tracking issues detected (sudden jumps, invalid quaternions)
+  - `lost`: No valid pose data available
+- **Units**: Meters for position, normalized quaternions for orientation
+- **Use Cases**: Drift-free trajectory reconstruction, floor plane projection, yaw extraction
+
 ### Derived IMU Data Files (`imu_derived_motion_*.csv`)
 - **Format**: CSV with calculated motion data derived from XR pose
 - **Columns**: UnixTime(ms), Ax, Ay, Az, Gx, Gy, Gz, QuatW, QuatX, QuatY, QuatZ
@@ -204,7 +219,75 @@ aspect_ratio = left_proj_matrix[1, 1] / left_proj_matrix[0, 0]
 fov_x = fov_y * aspect_ratio
 print(f"Field of View: {fov_x:.1f}° x {fov_y:.1f}°")
 
-# 4. Load Derived IMU Data
+# 4. Load and Process XR Path Log Data
+path_df = pd.read_csv('xr_path_log_2024-01-15_10-30-45_EST.csv', comment='#')
+
+# Extract session metadata from the comment line
+with open('xr_path_log_2024-01-15_10-30-45_EST.csv', 'r') as f:
+    metadata_line = f.readline().strip()
+    if metadata_line.startswith('# Session Metadata:'):
+        metadata_parts = metadata_line.split(': ')[1].split(',')
+        session_metadata = {
+            'session_id': metadata_parts[0],
+            'reference_space_type': metadata_parts[1],
+            'units': metadata_parts[2],
+            'handedness': metadata_parts[3],
+            'up_axis': metadata_parts[4],
+            'forward_axis': metadata_parts[5],
+            'headset_height_m': float(metadata_parts[6]) if metadata_parts[6] else None
+        }
+        print("Session Metadata:", session_metadata)
+
+# Filter for pose data only (ignore any other event types)
+pose_data = path_df[path_df['type'] == 'pose'].copy()
+pose_data['timestamp'] = pd.to_datetime(pose_data['UnixTime(ms)'], unit='ms')
+
+# Extract position and orientation
+position = pose_data[['PosX', 'PosY', 'PosZ']].values
+quaternion = pose_data[['OrientW', 'OrientX', 'OrientY', 'OrientZ']].values
+tracking_state = pose_data['trackingState'].values
+
+# Filter out frames with poor tracking quality
+good_tracking = pose_data['trackingState'].isin(['normal', 'limited'])
+clean_position = position[good_tracking]
+clean_quaternion = quaternion[good_tracking]
+
+print(f"Total frames: {len(pose_data)}")
+print(f"Good tracking frames: {len(clean_position)} ({len(clean_position)/len(pose_data)*100:.1f}%)")
+
+# Project to floor plane (x, y coordinates)
+if session_metadata['reference_space_type'] == 'local-floor':
+    # Already floor-relative, just use X and Z coordinates
+    floor_x = clean_position[:, 0]  # X position
+    floor_y = clean_position[:, 2]  # Z position (forward/backward)
+elif session_metadata['headset_height_m']:
+    # Project from local space to floor
+    headset_height = session_metadata['headset_height_m']
+    floor_x = clean_position[:, 0]  # X position
+    floor_y = clean_position[:, 2]  # Z position
+    # Optionally adjust for height: floor_height = clean_position[:, 1] - headset_height
+else:
+    # Use raw coordinates if no height info available
+    floor_x = clean_position[:, 0]
+    floor_y = clean_position[:, 2]
+
+# Extract yaw from quaternions
+from scipy.spatial.transform import Rotation
+head_rotation = Rotation.from_quat(clean_quaternion[:, [1,2,3,0]])  # scipy uses xyzw order
+euler_angles = head_rotation.as_euler('xyz', degrees=True)
+yaw = euler_angles[:, 2]  # Z-axis rotation (yaw)
+
+# Analyze trajectory
+trajectory_length = np.sum(np.sqrt(np.diff(floor_x)**2 + np.diff(floor_y)**2))
+print(f"Total trajectory length: {trajectory_length:.2f} meters")
+
+# Detect stationary periods (low movement)
+velocity = np.sqrt(np.diff(floor_x)**2 + np.diff(floor_y)**2)
+stationary_threshold = 0.01  # 1cm per frame
+stationary_frames = velocity < stationary_threshold
+print(f"Stationary frames: {np.sum(stationary_frames)} ({np.sum(stationary_frames)/len(velocity)*100:.1f}%)")
+
+# 5. Load Derived IMU Data
 imu_df = pd.read_csv('imu_derived_motion_2024-01-15T10-30-45.csv')
 
 # Calculate sampling rate

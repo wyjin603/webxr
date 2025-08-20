@@ -254,6 +254,18 @@
                 this.chirpTimingLog = [];
                 this.audioRecordingStartTime = null;
                 
+                // XR Path Logging with comprehensive metadata
+                this.xrPathLog = [];
+                this.xrSessionMetadata = {
+                    sessionId: this.generateSessionId(),
+                    referenceSpaceType: null,
+                    units: 'meters',
+                    handedness: 'right-handed',
+                    upAxis: '+Y',
+                    forwardAxis: '-Z',
+                    headsetHeightM: null // Will be estimated if not using local-floor
+                };
+                
                 // High-frequency data storage
                 this.imuData = [];
                 this.audioData = [];
@@ -609,16 +621,32 @@
                     const layer = new XRWebGLLayer(this.xrSession, this.gl);
                     this.xrSession.updateRenderState({ baseLayer: layer });
 
-                    // Get reference space with fallback
+                    // Get reference space with fallback and capture metadata
                     try {
-                        this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
+                        this.xrRefSpace = await this.xrSession.requestReferenceSpace('local-floor');
+                        this.xrSessionMetadata.referenceSpaceType = 'local-floor';
+                        console.log('Using local-floor reference space');
                     } catch (refError) {
                         try {
-                            this.xrRefSpace = await this.xrSession.requestReferenceSpace('viewer');
-                        } catch (viewerError) {
-                            throw new Error('No suitable reference space available');
+                            this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
+                            this.xrSessionMetadata.referenceSpaceType = 'local';
+                            console.log('Using local reference space (fallback from local-floor)');
+                            
+                            // For local space, we may need to estimate headset height
+                            this.xrSessionMetadata.headsetHeightM = 1.7; // Default estimate, will be updated if possible
+                        } catch (localError) {
+                            try {
+                                this.xrRefSpace = await this.xrSession.requestReferenceSpace('viewer');
+                                this.xrSessionMetadata.referenceSpaceType = 'viewer';
+                                console.log('Using viewer reference space (fallback)');
+                            } catch (viewerError) {
+                                throw new Error('No suitable reference space available');
+                            }
                         }
                     }
+                    
+                    // Log session metadata
+                    console.log('XR Session Metadata:', this.xrSessionMetadata);
 
                     // Start the render loop
                     this.xrSession.requestAnimationFrame((time, frame) => this.onXRFrame(time, frame));
@@ -766,6 +794,11 @@
                         const xrPoseEntry = `${timestamp},${position.x.toFixed(8)},${position.y.toFixed(8)},${position.z.toFixed(8)},${orientation.x.toFixed(8)},${orientation.y.toFixed(8)},${orientation.z.toFixed(8)},${orientation.w.toFixed(8)}`;
                         this.xrPoseData.push(xrPoseEntry);
                         
+                        // 1a. Collect Comprehensive Path Log Data with tracking state
+                        const trackingState = this.determineTrackingState(pose);
+                        const pathLogEntry = `${this.xrSessionMetadata.sessionId},pose,${timestamp},${position.x.toFixed(8)},${position.y.toFixed(8)},${position.z.toFixed(8)},${orientation.x.toFixed(8)},${orientation.y.toFixed(8)},${orientation.z.toFixed(8)},${orientation.w.toFixed(8)},${trackingState}`;
+                        this.xrPathLog.push(pathLogEntry);
+                        
                         // 2. Collect XR View Data (eye-specific transforms and projection matrices)
                         if (pose.views && pose.views.length > 0) {
                             for (let i = 0; i < pose.views.length; i++) {
@@ -851,6 +884,60 @@
                 }
             }
 
+            // Determine XR tracking state from pose data
+            determineTrackingState(pose) {
+                if (!pose || !pose.transform) {
+                    return 'lost';
+                }
+                
+                // Check if position and orientation are valid
+                const pos = pose.transform.position;
+                const orient = pose.transform.orientation;
+                
+                // Check for invalid values (NaN, extreme values, etc.)
+                if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z) ||
+                    isNaN(orient.x) || isNaN(orient.y) || isNaN(orient.z) || isNaN(orient.w)) {
+                    return 'lost';
+                }
+                
+                // Check if quaternion is normalized (should be close to 1)
+                const quatMagnitude = Math.sqrt(orient.x * orient.x + orient.y * orient.y + orient.z * orient.z + orient.w * orient.w);
+                if (Math.abs(quatMagnitude - 1.0) > 0.1) {
+                    return 'limited';
+                }
+                
+                // Check for extreme position values that might indicate tracking issues
+                const maxPos = 100; // 100 meters seems like a reasonable maximum
+                if (Math.abs(pos.x) > maxPos || Math.abs(pos.y) > maxPos || Math.abs(pos.z) > maxPos) {
+                    return 'limited';
+                }
+                
+                // Check if tracking was recently lost by comparing with previous frames
+                if (this.xrPathLog.length > 0) {
+                    const lastEntry = this.xrPathLog[this.xrPathLog.length - 1];
+                    const lastParts = lastEntry.split(',');
+                    if (lastParts.length >= 11) {
+                        const lastPosX = parseFloat(lastParts[3]);
+                        const lastPosY = parseFloat(lastParts[4]);
+                        const lastPosZ = parseFloat(lastParts[5]);
+                        
+                        // Check for sudden jumps that might indicate tracking issues
+                        const distance = Math.sqrt(
+                            Math.pow(pos.x - lastPosX, 2) +
+                            Math.pow(pos.y - lastPosY, 2) +
+                            Math.pow(pos.z - lastPosZ, 2)
+                        );
+                        
+                        // If position jumped more than 2 meters in one frame, it's likely limited tracking
+                        if (distance > 2.0) {
+                            return 'limited';
+                        }
+                    }
+                }
+                
+                return 'normal';
+            }
+
             quaternionToEuler(q) {
                 // Convert quaternion to Euler angles (in degrees)
                 const sinr_cosp = 2 * (q.w * q.x + q.y * q.z);
@@ -867,6 +954,16 @@
                 const yaw = Math.atan2(siny_cosp, cosy_cosp) * 180 / Math.PI;
 
                 return { roll, pitch, yaw };
+            }
+
+            // Generate unique session ID
+            generateSessionId() {
+                const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                let result = '';
+                for (let i = 0; i < 8; i++) {
+                    result += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return result;
             }
 
             // Ensure audio samples are always properly initialized
@@ -1413,6 +1510,7 @@
                     <strong>XR Pose Samples:</strong> ${this.xrPoseData.length}<br>
                     <strong>XR Eye View Samples:</strong> ${this.xrViewData.length}<br>
                     <strong>XR Projection Matrices:</strong> ${this.xrProjectionData.length}<br>
+                    <strong>XR Path Log Entries:</strong> ${this.xrPathLog ? this.xrPathLog.length : 0}<br>
                     <strong>Derived IMU Samples:</strong> ${this.imuData.length}<br>
                     <strong>Data Rate:</strong> ${dataRate.toFixed(1)} Hz (target: 800Hz)<br>
                     <strong>Raw Audio Samples:</strong> ${totalAudioSamples.toLocaleString()} (L:${leftAudioSamples.toLocaleString()}, R:${rightAudioSamples.toLocaleString()})<br>
@@ -1423,6 +1521,7 @@
                     &nbsp;&nbsp;XR Pose CSV: ~${(this.xrPoseData.length * 80 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Views CSV: ~${(this.xrViewData.length * 100 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Projection CSV: ~${(this.xrProjectionData.length * 200 / 1024).toFixed(1)}KB<br>
+                    &nbsp;&nbsp;XR Path Log CSV: ~${((this.xrPathLog ? this.xrPathLog.length : 0) * 120 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;IMU Motion CSV: ~${(this.imuData.length * 100 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;Stereo Audio WAV: ~${((leftAudioSamples + rightAudioSamples) * 2 / 1024 / 1024).toFixed(1)}MB
                 `;
@@ -1743,6 +1842,30 @@
                     } else {
                         console.warn('No raw audio samples to export');
                         this.updateStatus('No raw audio samples captured for export', 'warning');
+                    }
+                    
+                    // 7. Export XR Path Log with comprehensive metadata
+                    if (this.xrPathLog.length > 0) {
+                        console.log('Exporting XR path log with metadata...', {
+                            logEntries: this.xrPathLog.length,
+                            sessionMetadata: this.xrSessionMetadata
+                        });
+                        
+                        // Create CSV content with session metadata header
+                        const metadataHeader = `# Session Metadata: ${this.xrSessionMetadata.sessionId},${this.xrSessionMetadata.referenceSpaceType},${this.xrSessionMetadata.units},${this.xrSessionMetadata.handedness},${this.xrSessionMetadata.upAxis},${this.xrSessionMetadata.forwardAxis},${this.xrSessionMetadata.headsetHeightM || ''}`;
+                        const csvHeader = 'session_id,type,UnixTime(ms),PosX,PosY,PosZ,OrientX,OrientY,OrientZ,OrientW,trackingState';
+                        const csvContent = metadataHeader + '\n' + csvHeader + '\n' + this.xrPathLog.join('\n');
+                        
+                        const csvBlob = new Blob([csvContent], { type: 'text/csv' });
+                        const filename = `xr_path_log_${dateStr}.csv`;
+                        
+                        await this.exportToGitHub(csvBlob, filename, 'Comprehensive XR path log with tracking metadata');
+                        this.downloadFile(csvBlob, filename);
+                        exportedFiles.push(filename);
+                        
+                        console.log(`XR path log exported: ${filename}`);
+                    } else {
+                        console.log('No XR path data to export');
                     }
                     
                     // Export session metadata
@@ -2247,6 +2370,9 @@
                 // Clear chirp timing log
                 this.chirpTimingLog = [];
                 this.audioRecordingStartTime = null;
+                
+                // Clear XR path log
+                this.xrPathLog = [];
                 
                 // Clear comprehensive XR data
                 this.xrPoseData = [];
