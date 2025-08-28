@@ -147,13 +147,15 @@
                     <li><strong>Trigger (Primary):</strong> Stop WebXR Session</li>
                     <li><strong>Grip/Secondary Trigger:</strong> Export Data</li>
                     <li><strong>X/A Button:</strong> Play Chirp (16-20kHz)</li>
+                    <li><strong>Y/B Button:</strong> Play Chirp (8-23kHz)</li>
                     <li><strong>Menu Button:</strong> Toggle Audio Recording</li>
                 </ul>
                 <p><strong>Keyboard Shortcuts (VR Fallback):</strong></p>
                 <ul style="text-align: left; margin: 10px 0;">
                     <li><strong>S:</strong> Stop WebXR Session</li>
                     <li><strong>E:</strong> Export Data</li>
-                    <li><strong>P:</strong> Play Chirp</li>
+                    <li><strong>P:</strong> Play Chirp (16-20kHz)</li>
+                    <li><strong>P2 or 2:</strong> Play Chirp (8-23kHz)</li>
                     <li><strong>A:</strong> Toggle Audio Recording</li>
                     <li><strong>C:</strong> Clear All Data</li>
                 </ul>
@@ -167,7 +169,8 @@
         <div class="controls">
             <button id="init-btn" class="primary-btn">Initialize WebXR</button>
             <button id="start-audio-btn" class="secondary-btn" disabled>Start Audio Analysis</button>
-            <button id="play-chirp-btn" class="secondary-btn">🔊 Play Chirp</button>
+            <button id="play-chirp-btn" class="secondary-btn">🔊 Play Chirp (16-20kHz)</button>
+            <button id="play-chirp2-btn" class="secondary-btn">🔊 Play Chirp (8-23kHz)</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
             <button id="github-setup-btn" class="secondary-btn">Setup GitHub</button>
             <button id="clear-btn" class="secondary-btn">Clear Data</button>
@@ -236,13 +239,17 @@
                     stopPressed: false,
                     exportPressed: false,
                     lastStopPress: 0,
-                    lastExportPress: 0
+                    lastExportPress: 0,
+                    lastChirpPlay: 0,
+                    lastChirp2Play: 0
                 };
                 
                 // Chirp playback system
                 this.chirpAudio = null;
+                this.chirpAudio2 = null; // Second chirp audio
                 this.chirpPlaybackContext = null;
                 this.chirpLoadPromise = null;
+                this.chirp2LoadPromise = null; // Second chirp load promise
                 
                 // Raw PCM audio capture system - ALWAYS initialize as object
                 this.initializeAudioSamples();
@@ -291,6 +298,7 @@
                 this.initBtn = document.getElementById('init-btn');
                 this.startAudioBtn = document.getElementById('start-audio-btn');
                 this.playChirpBtn = document.getElementById('play-chirp-btn');
+                this.playChirp2Btn = document.getElementById('play-chirp2-btn');
                 this.exportBtn = document.getElementById('export-btn');
                 this.githubSetupBtn = document.getElementById('github-setup-btn');
                 this.clearBtn = document.getElementById('clear-btn');
@@ -303,6 +311,7 @@
                     initBtn: !!this.initBtn,
                     startAudioBtn: !!this.startAudioBtn,
                     playChirpBtn: !!this.playChirpBtn,
+                    playChirp2Btn: !!this.playChirp2Btn,
                     exportBtn: !!this.exportBtn,
                     githubSetupBtn: !!this.githubSetupBtn,
                     clearBtn: !!this.clearBtn,
@@ -376,6 +385,12 @@
                     console.log('Chirp button clicked!');
                     e.preventDefault();
                     this.playChirp();
+                });
+                
+                this.playChirp2Btn.addEventListener('click', (e) => {
+                    console.log('Chirp2 button clicked!');
+                    e.preventDefault();
+                    this.playChirp2();
                 });
                 
                 this.exportBtn.addEventListener('click', (e) => {
@@ -2123,8 +2138,9 @@
                         sampleRate: 48000
                     });
                     
-                    // Load the chirp audio file
+                    // Load both chirp audio files
                     this.chirpLoadPromise = this.loadChirpFile();
+                    this.chirp2LoadPromise = this.loadChirp2File();
                     
                     console.log('Chirp audio system initialized');
                     
@@ -2165,6 +2181,37 @@
                 }
             }
 
+            async loadChirp2File() {
+                try {
+                    console.log('Loading second chirp audio file...');
+                    
+                    // Try to load the second chirp file
+                    const response = await fetch('./chirp_8-23kHz_40ms.wav');
+                    
+                    if (!response.ok) {
+                        throw new Error(`Failed to load second chirp file: ${response.status} ${response.statusText}`);
+                    }
+                    
+                    const arrayBuffer = await response.arrayBuffer();
+                    this.chirpAudio2 = await this.chirpPlaybackContext.decodeAudioData(arrayBuffer);
+                    
+                    console.log('Second chirp audio loaded successfully:', {
+                        duration: this.chirpAudio2.duration,
+                        sampleRate: this.chirpAudio2.sampleRate,
+                        channels: this.chirpAudio2.numberOfChannels
+                    });
+                    
+                    this.updateStatus('Second chirp audio loaded successfully', 'success');
+                    
+                } catch (error) {
+                    console.warn('Could not load second chirp file:', error);
+                    this.updateStatus('Second chirp file not found - please add chirp_8-23kHz_40ms.wav to project', 'warning');
+                    
+                    // Generate a synthetic chirp as fallback
+                    this.generateSyntheticChirp2();
+                }
+            }
+
             generateSyntheticChirp() {
                 try {
                     console.log('Generating synthetic chirp...');
@@ -2195,6 +2242,43 @@
                     
                     console.log('Synthetic chirp generated successfully');
                     this.updateStatus('Synthetic chirp generated (16-20kHz, 40ms)', 'success');
+                    
+                } catch (error) {
+                    console.error('Failed to generate synthetic chirp:', error);
+                    this.updateStatus('Failed to generate chirp audio', 'error');
+                }
+            }
+
+            generateSyntheticChirp2() {
+                try {
+                    console.log('Generating synthetic chirp...');
+                    
+                    const sampleRate = 48000;
+                    const duration = 0.04; // 40ms
+                    const startFreq = 8000; // 8kHz
+                    const endFreq = 23000;   // 23kHz
+                    
+                    const samples = Math.floor(sampleRate * duration);
+                    this.chirpAudio2 = this.chirpPlaybackContext.createBuffer(1, samples, sampleRate);
+                    
+                    const channelData = this.chirpAudio2.getChannelData(0);
+                    
+                    for (let i = 0; i < samples; i++) {
+                        const t = i / sampleRate;
+                        const progress = t / duration;
+                        
+                        // Linear frequency sweep from startFreq to endFreq
+                        const frequency = startFreq + (endFreq - startFreq) * progress;
+                        
+                        // Generate the chirp signal with envelope
+                        const phase = 2 * Math.PI * frequency * t;
+                        const envelope = Math.sin(Math.PI * progress); // Bell-shaped envelope
+                        
+                        channelData[i] = envelope * Math.sin(phase) * 0.5; // 50% volume
+                    }
+                    
+                    console.log('Synthetic chirp generated successfully');
+                    this.updateStatus('Synthetic chirp generated (8-23kHz, 40ms)', 'success');
                     
                 } catch (error) {
                     console.error('Failed to generate synthetic chirp:', error);
@@ -2252,7 +2336,7 @@
                     
                     // Re-enable button after chirp finishes
                     setTimeout(() => {
-                        this.playChirpBtn.textContent = '🔊 Play Chirp';
+                        this.playChirpBtn.textContent = '🔊 Play Chirp (16-20kHz)';
                         this.playChirpBtn.disabled = false;
                     }, this.chirpAudio.duration * 1000 + 100);
                     
@@ -2263,8 +2347,74 @@
                     this.updateStatus('Failed to play chirp: ' + error.message, 'error');
                     
                     // Re-enable button on error
-                    this.playChirpBtn.textContent = '🔊 Play Chirp';
+                    this.playChirpBtn.textContent = '🔊 Play Chirp (16-20kHz)';
                     this.playChirpBtn.disabled = false;
+                }
+            }
+
+            async playChirp2() {
+                try {
+                    console.log('Playing second chirp...');
+                    
+                    // Ensure chirp is loaded
+                    if (this.chirp2LoadPromise) {
+                        await this.chirp2LoadPromise;
+                    }
+                    
+                    if (!this.chirpAudio2) {
+                        throw new Error('Second chirp audio not available');
+                    }
+                    
+                    // Resume audio context if suspended (required for user interaction)
+                    if (this.chirpPlaybackContext.state === 'suspended') {
+                        await this.chirpPlaybackContext.resume();
+                    }
+                    
+                    // Create audio source and connect to output
+                    const source = this.chirpPlaybackContext.createBufferSource();
+                    source.buffer = this.chirpAudio2;
+                    source.connect(this.chirpPlaybackContext.destination);
+                    
+                    // Log the chirp playback event with timestamp
+                    const chirpTimestamp = Date.now();
+                    const chirpTimestampSeconds = chirpTimestamp / 1000;
+                    console.log('Second chirp played at timestamp:', chirpTimestamp, 'seconds:', chirpTimestampSeconds);
+                    
+                    // Add to chirp timing log for TXT export
+                    this.chirpTimingLog.push(`FMCW Linear 8-23kHz Playback Started at ${chirpTimestampSeconds}`);
+                    
+                    // Store chirp event in audio data for analysis
+                    if (this.audioData) {
+                        this.audioData.push({
+                            timestamp: chirpTimestamp,
+                            event: 'chirp_playback_2',
+                            frequency_range: '8-23kHz',
+                            duration: this.chirpAudio2.duration * 1000 // in ms
+                        });
+                    }
+                    
+                    // Play the chirp
+                    source.start();
+                    
+                    // Update UI
+                    this.playChirp2Btn.textContent = '🔊 Playing...';
+                    this.playChirp2Btn.disabled = true;
+                    
+                    // Re-enable button after chirp finishes
+                    setTimeout(() => {
+                        this.playChirp2Btn.textContent = '🔊 Play Chirp (8-23kHz)';
+                        this.playChirp2Btn.disabled = false;
+                    }, this.chirpAudio2.duration * 1000 + 100);
+                    
+                    this.updateStatus(`Second chirp played (${this.chirpAudio2.duration * 1000}ms)`, 'success');
+                    
+                } catch (error) {
+                    console.error('Failed to play second chirp:', error);
+                    this.updateStatus('Failed to play second chirp: ' + error.message, 'error');
+                    
+                    // Re-enable button on error
+                    this.playChirp2Btn.textContent = '🔊 Play Chirp (8-23kHz)';
+                    this.playChirp2Btn.disabled = false;
                 }
             }
 
@@ -2348,6 +2498,15 @@
                                 this.playChirp();
                             }
                         }
+                        
+                        // Y/B button (index 5) = Play Second Chirp
+                        if (gamepad.buttons[5] && gamepad.buttons[5].pressed) {
+                            if (currentTime - (this.vrButtonStates.lastChirp2Play || 0) > 1000) {
+                                this.vrButtonStates.lastChirp2Play = currentTime;
+                                console.log('VR Controller: Second chirp playback triggered');
+                                this.playChirp2();
+                            }
+                        }
                     }
                 }
             }
@@ -2405,6 +2564,16 @@
                             event.preventDefault();
                         }
                         break;
+                        
+                    case 'p2':
+                    case '2':
+                        if (currentTime - (this.vrButtonStates.lastChirp2Play || 0) > 1000) {
+                            this.vrButtonStates.lastChirp2Play = currentTime;
+                            console.log('Keyboard: Second chirp playback triggered');
+                            this.playChirp2();
+                            event.preventDefault();
+                        }
+                        break;
                 }
             }
 
@@ -2435,9 +2604,13 @@
                 this.prevOrientation = { x: 0, y: 0, z: 0, w: 1 };
                 this.prevTime = 0;
                 
+                // Reset chirp buttons
+                this.playChirpBtn.textContent = '🔊 Play Chirp (16-20kHz)';
+                this.playChirp2Btn.textContent = '🔊 Play Chirp (8-23kHz)';
+                
                 document.getElementById('imu-data').textContent = 'Data cleared - ready for comprehensive XR data collection';
                 document.getElementById('audio-data').textContent = 'Raw PCM audio cleared - ready for 48kHz WAV recording';
-                document.getElementById('stats-data').textContent = 'All XR and raw audio data cleared';
+                document.getElementById('stats-data').textContent = 'All XR and raw PCM data cleared';
                 
                 this.updateStatus('All XR and raw PCM data cleared - ready for comprehensive collection', 'warning');
             }
