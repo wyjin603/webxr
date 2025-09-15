@@ -150,7 +150,7 @@
                     <li><strong>Y/B Button:</strong> Play Chirp (8-23kHz)</li>
                     <li><strong>Menu Button:</strong> Play Chirp (10-16kHz)</li>
                     <li><strong>Thumbstick Click:</strong> Play Chirp (2-8kHz)</li>
-                    <li><strong>Touchpad Click:</strong> Continuous Chirp (10Hz, 10s)</li>
+                    <li><strong>Touchpad Click:</strong> Continuous Chirp (2Hz, 10s)</li>
                     <li><strong>System Button:</strong> Toggle Audio Recording</li>
                 </ul>
                 <p><strong>Keyboard Shortcuts (VR Fallback):</strong></p>
@@ -161,7 +161,8 @@
                     <li><strong>P2 or 2:</strong> Play Chirp (8-23kHz)</li>
                     <li><strong>P3 or 3:</strong> Play Chirp (10-16kHz)</li>
                     <li><strong>P4 or 4:</strong> Play Chirp (2-8kHz)</li>
-                    <li><strong>PC:</strong> Continuous Chirp (10Hz, 10s)</li>
+                    <li><strong>PC:</strong> Continuous Chirp (2Hz, 10s)</li>
+                    <li><strong>L:</strong> Calibrate System Latency</li>
                     <li><strong>A:</strong> Toggle Audio Recording</li>
                     <li><strong>C:</strong> Clear All Data</li>
                 </ul>
@@ -179,7 +180,8 @@
             <button id="play-chirp2-btn" class="secondary-btn">🔊 Play Chirp (8-23kHz)</button>
             <button id="play-chirp3-btn" class="secondary-btn">🔊 Play Chirp (10-16kHz)</button>
             <button id="play-chirp4-btn" class="secondary-btn">🔊 Play Chirp (2-8kHz)</button>
-            <button id="play-continuous-chirp-btn" class="secondary-btn">🔁 Continuous Chirp (10Hz, 10s)</button>
+            <button id="play-continuous-chirp-btn" class="secondary-btn">🔁 Continuous Chirp (2Hz, 10s)</button>
+            <button id="calibrate-latency-btn" class="secondary-btn">⏱️ Calibrate System Latency</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
             <button id="github-setup-btn" class="secondary-btn">Setup GitHub</button>
             <button id="clear-btn" class="secondary-btn">Clear Data</button>
@@ -253,7 +255,8 @@
                     lastChirp2Play: 0,
                     lastChirp3Play: 0,
                     lastChirp4Play: 0,
-                    lastContinuousChirpPlay: 0
+                    lastContinuousChirpPlay: 0,
+                    lastLatencyCalibration: 0
                 };
                 
                 // Chirp playback system
@@ -271,6 +274,13 @@
                 this.continuousChirpInterval = null;
                 this.continuousChirpTimeout = null;
                 this.continuousChirpCount = 0;
+                
+                // System latency measurement
+                this.systemLatency = 0; // measured in milliseconds
+                this.latencyCalibrationStream = null;
+                this.latencyMediaRecorder = null;
+                this.latencyRecordedChunks = [];
+                this.latencyMeasurementInProgress = false;
                 
                 // Raw PCM audio capture system - ALWAYS initialize as object
                 this.initializeAudioSamples();
@@ -323,6 +333,7 @@
                 this.playChirp3Btn = document.getElementById('play-chirp3-btn');
                 this.playChirp4Btn = document.getElementById('play-chirp4-btn');
                 this.playContinuousChirpBtn = document.getElementById('play-continuous-chirp-btn');
+                this.calibrateLatencyBtn = document.getElementById('calibrate-latency-btn');
                 this.exportBtn = document.getElementById('export-btn');
                 this.githubSetupBtn = document.getElementById('github-setup-btn');
                 this.clearBtn = document.getElementById('clear-btn');
@@ -433,6 +444,12 @@
                     console.log('Continuous chirp button clicked!');
                     e.preventDefault();
                     this.playContinuousChirp();
+                });
+                
+                this.calibrateLatencyBtn.addEventListener('click', (e) => {
+                    console.log('Calibrate latency button clicked!');
+                    e.preventDefault();
+                    this.calibrateLatency();
                 });
                 
                 this.exportBtn.addEventListener('click', (e) => {
@@ -1920,7 +1937,23 @@
                         
                         // 6. Export Chirp Timing Log as TXT file (same base name as audio file)
                         if (this.chirpTimingLog.length > 0) {
-                            const txtContent = this.chirpTimingLog.join('\n');
+                            // Prepare TXT content with system latency information
+                            let txtContent = '';
+                            
+                            // Add system latency header
+                            txtContent += `=== System Latency Information ===\n`;
+                            if (this.systemLatency > 0) {
+                                txtContent += `Measured System Latency: ${this.systemLatency.toFixed(2)}ms\n`;
+                                txtContent += `Note: All chirp playback times are trigger times. Add ${this.systemLatency.toFixed(2)}ms for actual audio output times.\n`;
+                            } else {
+                                txtContent += `System Latency: Not calibrated (use Calibrate System Latency button)\n`;
+                                txtContent += `Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.\n`;
+                            }
+                            txtContent += `\n=== Chirp Timing Events ===\n`;
+                            
+                            // Add all chirp timing events
+                            txtContent += this.chirpTimingLog.join('\n');
+                            
                             const txtBlob = new Blob([txtContent], { type: 'text/plain' });
                             const txtFilename = filename.replace('.wav', '.txt'); // Same name as audio file but with .txt extension
                             
@@ -2732,7 +2765,7 @@
 
             async playContinuousChirp() {
                 try {
-                    console.log('Starting continuous chirp playback at 10Hz for 10 seconds...');
+                    console.log('Starting continuous chirp playback at 2Hz for 10 seconds...');
                     
                     // Ensure chirp is loaded (using chirp4 for continuous playback)
                     if (this.chirp4LoadPromise) {
@@ -2755,16 +2788,16 @@
                     this.continuousChirpCount = 0;
                     
                     // Update UI
-                    this.playContinuousChirpBtn.textContent = '🔁 Playing... (0/100)';
+                    this.playContinuousChirpBtn.textContent = '🔁 Playing... (0/20)';
                     this.playContinuousChirpBtn.disabled = true;
                     
                     const startTime = Date.now();
                     const startTimeSeconds = startTime / 1000;
                     
                     // Log start of continuous chirp sequence
-                    this.chirpTimingLog.push(`Continuous Chirp Sequence Started at ${startTimeSeconds} (10Hz for 10s, 2-8kHz)`);
+                    this.chirpTimingLog.push(`Continuous Chirp Sequence Started at ${startTimeSeconds} (2Hz for 10s, 2-8kHz)`);
                     
-                    // Set up interval for 10Hz (every 100ms)
+                    // Set up interval for 2Hz (every 500ms)
                     this.continuousChirpInterval = setInterval(async () => {
                         try {
                             const currentTime = Date.now();
@@ -2779,7 +2812,7 @@
                             this.continuousChirpCount++;
                             
                             // Log each chirp in the sequence
-                            this.chirpTimingLog.push(`Continuous Chirp ${this.continuousChirpCount}/100 at ${currentTimeSeconds}`);
+                            this.chirpTimingLog.push(`Continuous Chirp ${this.continuousChirpCount}/20 at ${currentTimeSeconds}`);
                             
                             // Store chirp event in audio data
                             if (this.audioData) {
@@ -2793,14 +2826,14 @@
                             }
                             
                             // Update UI with progress
-                            this.playContinuousChirpBtn.textContent = `🔁 Playing... (${this.continuousChirpCount}/100)`;
+                            this.playContinuousChirpBtn.textContent = `🔁 Playing... (${this.continuousChirpCount}/20)`;
                             
-                            console.log(`Continuous chirp ${this.continuousChirpCount}/100 played at ${currentTimeSeconds}`);
+                            console.log(`Continuous chirp ${this.continuousChirpCount}/20 played at ${currentTimeSeconds}`);
                             
                         } catch (error) {
                             console.error('Error during continuous chirp playback:', error);
                         }
-                    }, 100); // 10Hz = every 100ms
+                    }, 500); // 2Hz = every 500ms
                     
                     // Set timeout to stop after 10 seconds
                     this.continuousChirpTimeout = setTimeout(() => {
@@ -2815,19 +2848,19 @@
                         this.updateStatus(`Continuous chirp completed: ${this.continuousChirpCount} chirps in 10 seconds`, 'success');
                         
                         // Reset UI
-                        this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (10Hz, 10s)';
+                        this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (2Hz, 10s)';
                         this.playContinuousChirpBtn.disabled = false;
                         
                     }, 10000); // 10 seconds
                     
-                    this.updateStatus('Continuous chirp started: 10Hz for 10 seconds', 'success');
+                    this.updateStatus('Continuous chirp started: 2Hz for 10 seconds', 'success');
                     
                 } catch (error) {
                     console.error('Failed to start continuous chirp:', error);
                     this.updateStatus('Failed to start continuous chirp: ' + error.message, 'error');
                     
                     // Re-enable button on error
-                    this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (10Hz, 10s)';
+                    this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (2Hz, 10s)';
                     this.playContinuousChirpBtn.disabled = false;
                     this.stopContinuousChirp();
                 }
@@ -2842,6 +2875,208 @@
                 if (this.continuousChirpTimeout) {
                     clearTimeout(this.continuousChirpTimeout);
                     this.continuousChirpTimeout = null;
+                }
+            }
+
+            async calibrateLatency() {
+                if (this.latencyMeasurementInProgress) {
+                    this.updateStatus('Latency measurement already in progress', 'warning');
+                    return;
+                }
+                
+                try {
+                    this.latencyMeasurementInProgress = true;
+                    this.calibrateLatencyBtn.textContent = '⏱️ Measuring...';
+                    this.calibrateLatencyBtn.disabled = true;
+                    
+                    console.log('Starting system latency calibration...');
+                    this.updateStatus('Starting latency calibration - please ensure microphone is near speakers', 'info');
+                    
+                    // Ensure chirp audio is loaded
+                    if (this.chirpLoadPromise) {
+                        await this.chirpLoadPromise;
+                    }
+                    
+                    if (!this.chirpAudio) {
+                        throw new Error('Chirp audio not available for latency measurement');
+                    }
+                    
+                    // Get microphone access
+                    this.latencyCalibrationStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            sampleRate: 48000,
+                            channelCount: 1,
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false
+                        }
+                    });
+                    
+                    // Set up MediaRecorder
+                    this.latencyRecordedChunks = [];
+                    this.latencyMediaRecorder = new MediaRecorder(this.latencyCalibrationStream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+                    
+                    this.latencyMediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.latencyRecordedChunks.push(event.data);
+                        }
+                    };
+                    
+                    // Start recording
+                    this.latencyMediaRecorder.start(10); // Collect data every 10ms
+                    
+                    // Wait a moment for recording to stabilize
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Record the exact time we trigger the chirp
+                    const triggerTime = performance.now();
+                    console.log('Chirp triggered at:', triggerTime);
+                    
+                    // Play the chirp
+                    const source = this.chirpPlaybackContext.createBufferSource();
+                    source.buffer = this.chirpAudio;
+                    source.connect(this.chirpPlaybackContext.destination);
+                    source.start();
+                    
+                    // Record for chirp duration + some buffer
+                    const recordingDuration = (this.chirpAudio.duration * 1000) + 500; // Add 500ms buffer
+                    
+                    await new Promise(resolve => setTimeout(resolve, recordingDuration));
+                    
+                    // Stop recording
+                    this.latencyMediaRecorder.stop();
+                    
+                    // Wait for final data
+                    await new Promise(resolve => {
+                        this.latencyMediaRecorder.onstop = resolve;
+                    });
+                    
+                    // Process the recorded audio to detect chirp start
+                    const recordedBlob = new Blob(this.latencyRecordedChunks, { type: 'audio/webm' });
+                    const actualStartTime = await this.detectChirpStart(recordedBlob, triggerTime);
+                    
+                    if (actualStartTime !== null) {
+                        this.systemLatency = actualStartTime - triggerTime;
+                        console.log('System latency measured:', this.systemLatency, 'ms');
+                        this.updateStatus(`System latency calibrated: ${this.systemLatency.toFixed(2)}ms`, 'success');
+                        
+                        // Log calibration event
+                        const calibrationTimestamp = Date.now() / 1000;
+                        this.chirpTimingLog.push(`System Latency Calibration Completed at ${calibrationTimestamp}: ${this.systemLatency.toFixed(2)}ms`);
+                        
+                    } else {
+                        throw new Error('Could not detect chirp in recorded audio');
+                    }
+                    
+                } catch (error) {
+                    console.error('Latency calibration failed:', error);
+                    this.updateStatus('Latency calibration failed: ' + error.message, 'error');
+                    this.systemLatency = 0;
+                    
+                } finally {
+                    // Cleanup
+                    if (this.latencyCalibrationStream) {
+                        this.latencyCalibrationStream.getTracks().forEach(track => track.stop());
+                        this.latencyCalibrationStream = null;
+                    }
+                    
+                    this.latencyMediaRecorder = null;
+                    this.latencyRecordedChunks = [];
+                    this.latencyMeasurementInProgress = false;
+                    
+                    this.calibrateLatencyBtn.textContent = '⏱️ Calibrate System Latency';
+                    this.calibrateLatencyBtn.disabled = false;
+                }
+            }
+
+            async detectChirpStart(recordedBlob, triggerTime) {
+                try {
+                    console.log('Analyzing recorded audio for chirp detection...');
+                    
+                    // Convert blob to audio buffer
+                    const arrayBuffer = await recordedBlob.arrayBuffer();
+                    
+                    // Create a temporary audio context for analysis
+                    const analysisContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 48000
+                    });
+                    
+                    // Decode the recorded audio
+                    const audioBuffer = await analysisContext.decodeAudioData(arrayBuffer);
+                    const channelData = audioBuffer.getChannelData(0);
+                    const sampleRate = audioBuffer.sampleRate;
+                    
+                    console.log('Recorded audio analysis:', {
+                        duration: audioBuffer.duration,
+                        sampleRate: sampleRate,
+                        samples: channelData.length
+                    });
+                    
+                    // Analyze audio to detect chirp start
+                    // Look for significant energy increase that indicates chirp start
+                    const windowSize = Math.floor(sampleRate * 0.010); // 10ms window
+                    const threshold = 0.01; // Amplitude threshold for chirp detection
+                    let baselineEnergy = 0;
+                    let baselineSamples = Math.floor(sampleRate * 0.050); // First 50ms for baseline
+                    
+                    // Calculate baseline energy (before chirp should start)
+                    for (let i = 0; i < Math.min(baselineSamples, channelData.length); i++) {
+                        baselineEnergy += Math.abs(channelData[i]);
+                    }
+                    baselineEnergy /= baselineSamples;
+                    
+                    console.log('Baseline energy:', baselineEnergy);
+                    
+                    // Look for energy spike indicating chirp start
+                    for (let i = baselineSamples; i < channelData.length - windowSize; i += windowSize) {
+                        let windowEnergy = 0;
+                        
+                        // Calculate energy in current window
+                        for (let j = i; j < i + windowSize && j < channelData.length; j++) {
+                            windowEnergy += Math.abs(channelData[j]);
+                        }
+                        windowEnergy /= windowSize;
+                        
+                        // Check if energy significantly exceeds baseline
+                        if (windowEnergy > baselineEnergy + threshold) {
+                            // Found potential chirp start
+                            const detectionTimeMs = (i / sampleRate) * 1000;
+                            const actualStartTime = triggerTime + detectionTimeMs;
+                            
+                            console.log('Chirp detected at sample:', i, 'time offset:', detectionTimeMs, 'ms');
+                            console.log('Window energy:', windowEnergy, 'vs baseline:', baselineEnergy);
+                            
+                            analysisContext.close();
+                            return actualStartTime;
+                        }
+                    }
+                    
+                    // If no clear chirp detected, try a more sensitive approach
+                    console.log('Primary detection failed, trying secondary method...');
+                    
+                    // Look for any significant amplitude change
+                    const sensitiveThreshold = baselineEnergy * 2;
+                    for (let i = baselineSamples; i < channelData.length; i++) {
+                        if (Math.abs(channelData[i]) > sensitiveThreshold) {
+                            const detectionTimeMs = (i / sampleRate) * 1000;
+                            const actualStartTime = triggerTime + detectionTimeMs;
+                            
+                            console.log('Secondary chirp detection at sample:', i, 'time offset:', detectionTimeMs, 'ms');
+                            
+                            analysisContext.close();
+                            return actualStartTime;
+                        }
+                    }
+                    
+                    analysisContext.close();
+                    console.log('No chirp detected in recorded audio');
+                    return null;
+                    
+                } catch (error) {
+                    console.error('Error analyzing recorded audio:', error);
+                    return null;
                 }
             }
 
@@ -3057,6 +3292,15 @@
                             event.preventDefault();
                         }
                         break;
+                        
+                    case 'l':
+                        if (!this.latencyMeasurementInProgress && currentTime - (this.vrButtonStates.lastLatencyCalibration || 0) > 5000) { // 5s cooldown
+                            this.vrButtonStates.lastLatencyCalibration = currentTime;
+                            console.log('Keyboard: Latency calibration triggered');
+                            this.calibrateLatency();
+                            event.preventDefault();
+                        }
+                        break;
                 }
             }
 
@@ -3092,10 +3336,12 @@
                 this.playChirp2Btn.textContent = '🔊 Play Chirp (8-23kHz)';
                 this.playChirp3Btn.textContent = '🔊 Play Chirp (10-16kHz)';
                 this.playChirp4Btn.textContent = '🔊 Play Chirp (2-8kHz)';
-                this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (10Hz, 10s)';
+                this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (2Hz, 10s)';
+                this.calibrateLatencyBtn.textContent = '⏱️ Calibrate System Latency';
                 
-                // Stop any continuous chirp playback
+                // Stop any continuous chirp playback and reset latency measurement
                 this.stopContinuousChirp();
+                this.systemLatency = 0;
                 
                 document.getElementById('imu-data').textContent = 'Data cleared - ready for comprehensive XR data collection';
                 document.getElementById('audio-data').textContent = 'Raw PCM audio cleared - ready for 48kHz WAV recording';
