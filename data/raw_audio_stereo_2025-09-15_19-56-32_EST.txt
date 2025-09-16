@@ -1,0 +1,71 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+Continuous Chirp Sequence Started at 1757984153.701 (2Hz for 10s, 2-8kHz)
+Continuous Chirp 1/20 at 1757984154.206
+Continuous Chirp 2/20 at 1757984154.717
+Continuous Chirp 3/20 at 1757984155.22
+Continuous Chirp 4/20 at 1757984155.719
+Continuous Chirp 5/20 at 1757984156.208
+Continuous Chirp 6/20 at 1757984156.724
+Continuous Chirp 7/20 at 1757984157.216
+Continuous Chirp 8/20 at 1757984157.711
+Continuous Chirp 9/20 at 1757984158.217
+Continuous Chirp 10/20 at 1757984158.707
+Continuous Chirp 11/20 at 1757984159.207
+Continuous Chirp 12/20 at 1757984159.708
+Continuous Chirp 13/20 at 1757984160.214
+Continuous Chirp 14/20 at 1757984160.702
+Continuous Chirp 15/20 at 1757984161.202
+Continuous Chirp 16/20 at 1757984161.706
+Continuous Chirp 17/20 at 1757984162.219
+Continuous Chirp 18/20 at 1757984162.706
+Continuous Chirp 19/20 at 1757984163.203
+Continuous Chirp 20/20 at 1757984163.712
+Continuous Chirp Sequence Completed at 1757984163.713 (20 chirps total)
+Continuous Chirp Sequence Started at 1757984166.613 (2Hz for 10s, 2-8kHz)
+Continuous Chirp 1/20 at 1757984167.119
+Continuous Chirp 2/20 at 1757984167.613
+Continuous Chirp 3/20 at 1757984168.119
+Continuous Chirp 4/20 at 1757984168.617
+Continuous Chirp 5/20 at 1757984169.118
+Continuous Chirp 6/20 at 1757984169.624
+Continuous Chirp 7/20 at 1757984170.119
+Continuous Chirp 8/20 at 1757984170.613
+Continuous Chirp 9/20 at 1757984171.113
+Continuous Chirp 10/20 at 1757984171.613
+Continuous Chirp 11/20 at 1757984172.118
+Continuous Chirp 12/20 at 1757984172.622
+Continuous Chirp 13/20 at 1757984173.115
+Continuous Chirp 14/20 at 1757984173.616
+Continuous Chirp 15/20 at 1757984174.116
+Continuous Chirp 16/20 at 1757984174.617
+Continuous Chirp 17/20 at 1757984175.117
+Continuous Chirp 18/20 at 1757984175.621
+Continuous Chirp 19/20 at 1757984176.12
+Continuous Chirp 20/20 at 1757984176.613
+Continuous Chirp Sequence Completed at 1757984176.613 (20 chirps total)
+Continuous Chirp Sequence Started at 1757984178.551 (2Hz for 10s, 2-8kHz)
+Continuous Chirp 1/20 at 1757984179.067
+Continuous Chirp 2/20 at 1757984179.551
+Continuous Chirp 3/20 at 1757984180.051
+Continuous Chirp 4/20 at 1757984180.557
+Continuous Chirp 5/20 at 1757984181.056
+Continuous Chirp 6/20 at 1757984181.553
+Continuous Chirp 7/20 at 1757984182.051
+Continuous Chirp 8/20 at 1757984182.551
+Continuous Chirp 9/20 at 1757984183.056
+Continuous Chirp 10/20 at 1757984183.572
+Continuous Chirp 11/20 at 1757984184.063
+Continuous Chirp 12/20 at 1757984184.571
+Continuous Chirp 13/20 at 1757984185.061
+Continuous Chirp 14/20 at 1757984185.566
+Continuous Chirp 15/20 at 1757984186.07
+Continuous Chirp 16/20 at 1757984186.558
+Continuous Chirp 17/20 at 1757984187.065
+Continuous Chirp 18/20 at 1757984187.553
+Continuous Chirp 19/20 at 1757984188.07
+Continuous Chirp 20/20 at 1757984188.567
+Continuous Chirp Sequence Completed at 1757984188.567 (20 chirps total)
