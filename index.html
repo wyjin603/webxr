@@ -154,20 +154,6 @@
                     <li><strong>System Button:</strong> Continuous Multiband Chirp (2Hz, 10s)</li>
                     <li><strong>Grip Button:</strong> Toggle Audio Recording</li>
                 </ul>
-                <p><strong>Keyboard Shortcuts (VR Fallback):</strong></p>
-                <ul style="text-align: left; margin: 10px 0;">
-                    <li><strong>S:</strong> Stop WebXR Session</li>
-                    <li><strong>E:</strong> Export Data</li>
-                    <li><strong>P:</strong> Play Chirp (16-20kHz)</li>
-                    <li><strong>P2 or 2:</strong> Play Chirp (8-23kHz)</li>
-                    <li><strong>P3 or 3:</strong> Play Chirp (10-16kHz)</li>
-                    <li><strong>P4 or 4:</strong> Play Chirp (2-8kHz)</li>
-                    <li><strong>PC:</strong> Continuous Chirp (2Hz, 10s)</li>
-                    <li><strong>PM or M:</strong> Continuous Multiband Chirp (2Hz, 10s)</li>
-                    <li><strong>L:</strong> Calibrate System Latency</li>
-                    <li><strong>A:</strong> Toggle Audio Recording</li>
-                    <li><strong>C:</strong> Clear All Data</li>
-                </ul>
             </div>
         </div>
 
@@ -560,7 +546,6 @@
                         const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
                         const filename = `test_stereo_wav_${Date.now()}.wav`;
                         
-                        this.downloadFile(wavBlob, filename);
                         console.log('Test stereo WAV export successful!');
                         this.updateStatus('Test stereo WAV file exported successfully', 'success');
                     } catch (error) {
@@ -595,7 +580,6 @@
                     const txtBlob = new Blob([txtContent], { type: 'text/plain' });
                     const filename = `test_chirp_timing_${Date.now()}.txt`;
                     
-                    this.downloadFile(txtBlob, filename);
                     console.log('Test chirp timing log exported:', filename);
                     this.updateStatus('Test chirp timing log exported successfully', 'success');
                 };
@@ -1846,7 +1830,6 @@
                         
                         const csvBlob = new Blob([csvContent], { type: 'text/csv' });
                         await this.exportToGitHub(csvBlob, filename, 'XR viewer pose data (head position and orientation)');
-                        this.downloadFile(csvBlob, filename);
                         exportedFiles.push(filename);
                     }
                     
@@ -1858,7 +1841,6 @@
                         
                         const csvBlob = new Blob([csvContent], { type: 'text/csv' });
                         await this.exportToGitHub(csvBlob, filename, 'XR eye view transforms (left/right eye positions and orientations)');
-                        this.downloadFile(csvBlob, filename);
                         exportedFiles.push(filename);
                     }
                     
@@ -1870,7 +1852,6 @@
                         
                         const csvBlob = new Blob([csvContent], { type: 'text/csv' });
                         await this.exportToGitHub(csvBlob, filename, 'XR projection matrices for stereo rendering');
-                        this.downloadFile(csvBlob, filename);
                         exportedFiles.push(filename);
                     }
                     
@@ -1882,7 +1863,6 @@
                         
                         const csvBlob = new Blob([csvContent], { type: 'text/csv' });
                         await this.exportToGitHub(csvBlob, filename, 'Derived IMU motion data (calculated acceleration and gyroscope)');
-                        this.downloadFile(csvBlob, filename);
                         exportedFiles.push(filename);
                     }
                     
@@ -1946,7 +1926,6 @@
                         });
                         
                         await this.exportToGitHub(wavBlob, filename, 'Raw PCM stereo audio data (WAV format)');
-                        this.downloadFile(wavBlob, filename);
                         exportedFiles.push(filename);
                         
                         this.updateStatus(`Stereo WAV file exported: ${filename} (${(wavBlob.size / 1024 / 1024).toFixed(2)}MB)`, 'success');
@@ -1980,7 +1959,6 @@
                             });
                             
                             await this.exportToGitHub(txtBlob, txtFilename, 'Chirp timing log with recording start and playback events');
-                            this.downloadFile(txtBlob, txtFilename);
                             exportedFiles.push(txtFilename);
                             
                             console.log(`Chirp timing log exported: ${txtFilename}`);
@@ -2014,7 +1992,6 @@
                         const filename = `xr_path_log_${dateStr}.csv`;
                         
                         await this.exportToGitHub(csvBlob, filename, 'Comprehensive XR path log with tracking metadata');
-                        this.downloadFile(csvBlob, filename);
                         exportedFiles.push(filename);
                         
                         console.log(`XR path log exported: ${filename}`);
@@ -2037,7 +2014,6 @@
                     const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
                     const metadataFilename = `session_metadata_${dateStr}.json`;
                     await this.exportToGitHub(metadataBlob, metadataFilename, 'Session metadata');
-                    this.downloadFile(metadataBlob, metadataFilename);
                     
                     const totalSamples = this.xrPoseData.length + this.xrViewData.length + this.xrProjectionData.length + this.imuData.length;
                     this.updateStatus(`Comprehensive XR data exported: ${totalSamples} total samples across ${exportedFiles.length} files`, 'success');
@@ -2109,35 +2085,6 @@
                 });
             }
 
-            downloadFile(blob, filename) {
-                // VR-compatible download method
-                if (navigator.xr && this.xrSession && this.xrSession.visibilityState === 'visible') {
-                    // In VR mode, use a different approach
-                    this.showVRDownloadNotification(filename);
-                } else {
-                    // Standard download for desktop/mobile
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                    a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-                    setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                    }, 100);
-                }
-            }
-            
-            showVRDownloadNotification(filename) {
-                // Show notification in VR that file is being exported to GitHub
-                this.updateStatus(`File ${filename} exported to GitHub (VR mode)`, 'success');
-                
-                // Optionally create a visual notification in 3D space
-                // This would require WebXR rendering code
-                console.log(`VR Export: ${filename} - Check GitHub repository for the file`);
-            }
 
             toggleGitHubSetup() {
                 const setupPanel = document.getElementById('github-setup');
