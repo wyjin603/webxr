@@ -26,7 +26,6 @@ Continuous Chirp 18/20 at 1757977774.948
 Continuous Chirp 19/20 at 1757977775.46
 Continuous Chirp 20/20 at 1757977775.949
 Continuous Chirp Sequence Completed at 1757977775.95 (20 chirps total)
-FMCW Linear 16-20kHz Playback Started at 1757977781.231
 Continuous Chirp Sequence Started at 1757977783.176 (2Hz for 10s, 2-8kHz)
 Continuous Chirp 1/20 at 1757977783.689
 Continuous Chirp 2/20 at 1757977784.176
