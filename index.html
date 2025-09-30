@@ -151,7 +151,8 @@
                     <li><strong>Menu Button:</strong> Play Chirp (10-16kHz)</li>
                     <li><strong>Thumbstick Click:</strong> Play Chirp (2-8kHz)</li>
                     <li><strong>Touchpad Click:</strong> Continuous Chirp (2Hz, 10s)</li>
-                    <li><strong>System Button:</strong> Toggle Audio Recording</li>
+                    <li><strong>System Button:</strong> Continuous Multiband Chirp (2Hz, 10s)</li>
+                    <li><strong>Grip Button:</strong> Toggle Audio Recording</li>
                 </ul>
                 <p><strong>Keyboard Shortcuts (VR Fallback):</strong></p>
                 <ul style="text-align: left; margin: 10px 0;">
@@ -162,6 +163,7 @@
                     <li><strong>P3 or 3:</strong> Play Chirp (10-16kHz)</li>
                     <li><strong>P4 or 4:</strong> Play Chirp (2-8kHz)</li>
                     <li><strong>PC:</strong> Continuous Chirp (2Hz, 10s)</li>
+                    <li><strong>PM or M:</strong> Continuous Multiband Chirp (2Hz, 10s)</li>
                     <li><strong>L:</strong> Calibrate System Latency</li>
                     <li><strong>A:</strong> Toggle Audio Recording</li>
                     <li><strong>C:</strong> Clear All Data</li>
@@ -181,6 +183,7 @@
             <button id="play-chirp3-btn" class="secondary-btn">🔊 Play Chirp (10-16kHz)</button>
             <button id="play-chirp4-btn" class="secondary-btn">🔊 Play Chirp (2-8kHz)</button>
             <button id="play-continuous-chirp-btn" class="secondary-btn">🔁 Continuous Chirp (2Hz, 10s)</button>
+            <button id="play-continuous-multiband-btn" class="secondary-btn">🔁 Continuous Multiband (2Hz, 10s)</button>
             <button id="calibrate-latency-btn" class="secondary-btn">⏱️ Calibrate System Latency</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
             <button id="github-setup-btn" class="secondary-btn">Setup GitHub</button>
@@ -256,6 +259,7 @@
                     lastChirp3Play: 0,
                     lastChirp4Play: 0,
                     lastContinuousChirpPlay: 0,
+                    lastContinuousMultibandPlay: 0,
                     lastLatencyCalibration: 0
                 };
                 
@@ -274,6 +278,11 @@
                 this.continuousChirpInterval = null;
                 this.continuousChirpTimeout = null;
                 this.continuousChirpCount = 0;
+                
+                // Continuous multiband chirp playback system (10-16kHz)
+                this.continuousMultibandInterval = null;
+                this.continuousMultibandTimeout = null;
+                this.continuousMultibandCount = 0;
                 
                 // System latency measurement
                 this.systemLatency = 0; // measured in milliseconds
@@ -333,6 +342,7 @@
                 this.playChirp3Btn = document.getElementById('play-chirp3-btn');
                 this.playChirp4Btn = document.getElementById('play-chirp4-btn');
                 this.playContinuousChirpBtn = document.getElementById('play-continuous-chirp-btn');
+                this.playContinuousMultibandBtn = document.getElementById('play-continuous-multiband-btn');
                 this.calibrateLatencyBtn = document.getElementById('calibrate-latency-btn');
                 this.exportBtn = document.getElementById('export-btn');
                 this.githubSetupBtn = document.getElementById('github-setup-btn');
@@ -444,6 +454,12 @@
                     console.log('Continuous chirp button clicked!');
                     e.preventDefault();
                     this.playContinuousChirp();
+                });
+                
+                this.playContinuousMultibandBtn.addEventListener('click', (e) => {
+                    console.log('Continuous multiband chirp button clicked!');
+                    e.preventDefault();
+                    this.playContinuousMultiband();
                 });
                 
                 this.calibrateLatencyBtn.addEventListener('click', (e) => {
@@ -2878,6 +2894,121 @@
                 }
             }
 
+            async playContinuousMultiband() {
+                try {
+                    console.log('Starting continuous multiband chirp playback at 2Hz for 10 seconds...');
+                    
+                    // Ensure chirp is loaded (using chirp3 for multiband continuous playback)
+                    if (this.chirp3LoadPromise) {
+                        await this.chirp3LoadPromise;
+                    }
+                    
+                    if (!this.chirpAudio3) {
+                        throw new Error('Multiband chirp audio not available for continuous playback');
+                    }
+                    
+                    // Resume audio context if suspended
+                    if (this.chirpPlaybackContext.state === 'suspended') {
+                        await this.chirpPlaybackContext.resume();
+                    }
+                    
+                    // Clear any existing continuous multiband playback
+                    this.stopContinuousMultiband();
+                    
+                    // Reset counter
+                    this.continuousMultibandCount = 0;
+                    
+                    // Update UI
+                    this.playContinuousMultibandBtn.textContent = '🔁 Playing... (0/20)';
+                    this.playContinuousMultibandBtn.disabled = true;
+                    
+                    const startTime = Date.now();
+                    const startTimeSeconds = startTime / 1000;
+                    
+                    // Log start of continuous multiband chirp sequence
+                    this.chirpTimingLog.push(`Continuous Multiband Chirp Sequence Started at ${startTimeSeconds} (2Hz for 10s, 10-16kHz)`);
+                    
+                    // Set up interval for 2Hz (every 500ms)
+                    this.continuousMultibandInterval = setInterval(async () => {
+                        try {
+                            const currentTime = Date.now();
+                            const currentTimeSeconds = currentTime / 1000;
+                            
+                            // Create and play chirp
+                            const source = this.chirpPlaybackContext.createBufferSource();
+                            source.buffer = this.chirpAudio3; // Using chirp3 (10-16kHz multiband)
+                            source.connect(this.chirpPlaybackContext.destination);
+                            source.start();
+                            
+                            this.continuousMultibandCount++;
+                            
+                            // Log each chirp in the sequence
+                            this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultibandCount}/20 at ${currentTimeSeconds}`);
+                            
+                            // Store chirp event in audio data
+                            if (this.audioData) {
+                                this.audioData.push({
+                                    timestamp: currentTime,
+                                    event: 'continuous_multiband_chirp_playback',
+                                    sequence_number: this.continuousMultibandCount,
+                                    frequency_range: '10-16kHz',
+                                    duration: this.chirpAudio3.duration * 1000
+                                });
+                            }
+                            
+                            // Update UI with progress
+                            this.playContinuousMultibandBtn.textContent = `🔁 Playing... (${this.continuousMultibandCount}/20)`;
+                            
+                            console.log(`Continuous multiband chirp ${this.continuousMultibandCount}/20 played at ${currentTimeSeconds}`);
+                            
+                        } catch (error) {
+                            console.error('Error during continuous multiband chirp playback:', error);
+                        }
+                    }, 500); // 2Hz = every 500ms
+                    
+                    // Set timeout to stop after 10 seconds
+                    this.continuousMultibandTimeout = setTimeout(() => {
+                        this.stopContinuousMultiband();
+                        
+                        const endTime = Date.now();
+                        const endTimeSeconds = endTime / 1000;
+                        
+                        // Log end of sequence
+                        this.chirpTimingLog.push(`Continuous Multiband Chirp Sequence Completed at ${endTimeSeconds} (${this.continuousMultibandCount} chirps total)`);
+                        
+                        this.updateStatus(`Continuous multiband chirp completed: ${this.continuousMultibandCount} chirps in 10 seconds`, 'success');
+                        
+                        // Reset UI
+                        this.playContinuousMultibandBtn.textContent = '🔁 Continuous Multiband (2Hz, 10s)';
+                        this.playContinuousMultibandBtn.disabled = false;
+                        
+                    }, 10000); // 10 seconds
+                    
+                    this.updateStatus('Continuous multiband chirp started: 2Hz for 10 seconds', 'success');
+                    
+                } catch (error) {
+                    console.error('Failed to start continuous multiband chirp:', error);
+                    this.updateStatus('Failed to start continuous multiband chirp: ' + error.message, 'error');
+                    
+                    // Re-enable button on error
+                    this.playContinuousMultibandBtn.textContent = '🔁 Continuous Multiband (2Hz, 10s)';
+                    this.playContinuousMultibandBtn.disabled = false;
+                    this.stopContinuousMultiband();
+                }
+            }
+
+            stopContinuousMultiband() {
+                if (this.continuousMultibandInterval) {
+                    clearInterval(this.continuousMultibandInterval);
+                    this.continuousMultibandInterval = null;
+                }
+                
+                if (this.continuousMultibandTimeout) {
+                    clearTimeout(this.continuousMultibandTimeout);
+                    this.continuousMultibandTimeout = null;
+                }
+            }
+
             async calibrateLatency() {
                 if (this.latencyMeasurementInProgress) {
                     this.updateStatus('Latency measurement already in progress', 'warning');
@@ -3196,6 +3327,15 @@
                                 this.playContinuousChirp();
                             }
                         }
+                        
+                        // System button (index 7) = Continuous Multiband Chirp
+                        if (gamepad.buttons[7] && gamepad.buttons[7].pressed) {
+                            if (currentTime - (this.vrButtonStates.lastContinuousMultibandPlay || 0) > 12000) { // 12s cooldown
+                                this.vrButtonStates.lastContinuousMultibandPlay = currentTime;
+                                console.log('VR Controller: Continuous multiband chirp playback triggered');
+                                this.playContinuousMultiband();
+                            }
+                        }
                     }
                 }
             }
@@ -3293,6 +3433,16 @@
                         }
                         break;
                         
+                    case 'pm':
+                    case 'm':
+                        if (currentTime - (this.vrButtonStates.lastContinuousMultibandPlay || 0) > 12000) { // 12s cooldown
+                            this.vrButtonStates.lastContinuousMultibandPlay = currentTime;
+                            console.log('Keyboard: Continuous multiband chirp playback triggered');
+                            this.playContinuousMultiband();
+                            event.preventDefault();
+                        }
+                        break;
+                        
                     case 'l':
                         if (!this.latencyMeasurementInProgress && currentTime - (this.vrButtonStates.lastLatencyCalibration || 0) > 5000) { // 5s cooldown
                             this.vrButtonStates.lastLatencyCalibration = currentTime;
@@ -3337,10 +3487,12 @@
                 this.playChirp3Btn.textContent = '🔊 Play Chirp (10-16kHz)';
                 this.playChirp4Btn.textContent = '🔊 Play Chirp (2-8kHz)';
                 this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (2Hz, 10s)';
+                this.playContinuousMultibandBtn.textContent = '🔁 Continuous Multiband (2Hz, 10s)';
                 this.calibrateLatencyBtn.textContent = '⏱️ Calibrate System Latency';
                 
                 // Stop any continuous chirp playback and reset latency measurement
                 this.stopContinuousChirp();
+                this.stopContinuousMultiband();
                 this.systemLatency = 0;
                 
                 document.getElementById('imu-data').textContent = 'Data cleared - ready for comprehensive XR data collection';
