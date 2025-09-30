@@ -1,0 +1,15 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198438.363
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198439.521
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198440.778
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198441.981
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198443.302
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198444.965
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198446.456
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198447.803
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198449.339
+FMCW Linear 10-16kHz Multiband Playback Started at 1759198450.831
