@@ -1,0 +1,72 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+Stereo Recording Started at 1761617631.266
+Continuous Multiband Chirp Sequence Started at 1761617632.879 (2Hz for 10s, 10-16kHz)
+Continuous Multiband Chirp 1/20 at 1761617633.397
+Continuous Multiband Chirp 2/20 at 1761617633.882
+Continuous Multiband Chirp 3/20 at 1761617634.383
+Continuous Multiband Chirp 4/20 at 1761617634.88
+Continuous Multiband Chirp 5/20 at 1761617635.382
+Continuous Multiband Chirp 6/20 at 1761617635.884
+Continuous Multiband Chirp 7/20 at 1761617636.385
+Continuous Multiband Chirp 8/20 at 1761617636.887
+Continuous Multiband Chirp 9/20 at 1761617637.387
+Continuous Multiband Chirp 10/20 at 1761617637.893
+Continuous Multiband Chirp 11/20 at 1761617638.387
+Continuous Multiband Chirp 12/20 at 1761617638.894
+Continuous Multiband Chirp 13/20 at 1761617639.397
+Continuous Multiband Chirp 14/20 at 1761617639.889
+Continuous Multiband Chirp 15/20 at 1761617640.392
+Continuous Multiband Chirp 16/20 at 1761617640.879
+Continuous Multiband Chirp 17/20 at 1761617641.384
+Continuous Multiband Chirp 18/20 at 1761617641.9
+Continuous Multiband Chirp 19/20 at 1761617642.389
+Continuous Multiband Chirp 20/20 at 1761617642.879
+Continuous Multiband Chirp Sequence Completed at 1761617642.879 (20 chirps total)
+Continuous Multiband Chirp Sequence Started at 1761617645.275 (2Hz for 10s, 10-16kHz)
+Continuous Multiband Chirp 1/20 at 1761617645.784
+Continuous Multiband Chirp 2/20 at 1761617646.286
+Continuous Multiband Chirp 3/20 at 1761617646.784
+Continuous Multiband Chirp 4/20 at 1761617647.276
+Continuous Multiband Chirp 5/20 at 1761617647.778
+Continuous Multiband Chirp 6/20 at 1761617648.279
+Continuous Multiband Chirp 7/20 at 1761617648.78
+Continuous Multiband Chirp 8/20 at 1761617649.282
+Continuous Multiband Chirp 9/20 at 1761617649.782
+Continuous Multiband Chirp 10/20 at 1761617650.283
+Continuous Multiband Chirp 11/20 at 1761617650.775
+Continuous Multiband Chirp 12/20 at 1761617651.276
+Continuous Multiband Chirp 13/20 at 1761617651.776
+Continuous Multiband Chirp 14/20 at 1761617652.277
+Continuous Multiband Chirp 15/20 at 1761617652.778
+Continuous Multiband Chirp 16/20 at 1761617653.28
+Continuous Multiband Chirp 17/20 at 1761617653.782
+Continuous Multiband Chirp 18/20 at 1761617654.282
+Continuous Multiband Chirp 19/20 at 1761617654.784
+Continuous Multiband Chirp 20/20 at 1761617655.276
+Continuous Multiband Chirp Sequence Completed at 1761617655.276 (20 chirps total)
+Continuous Multiband Chirp Sequence Started at 1761617663.687 (2Hz for 10s, 10-16kHz)
+Continuous Multiband Chirp 1/20 at 1761617664.19
+Continuous Multiband Chirp 2/20 at 1761617664.696
+Continuous Multiband Chirp 3/20 at 1761617665.197
+Continuous Multiband Chirp 4/20 at 1761617665.687
+Continuous Multiband Chirp 5/20 at 1761617666.196
+Continuous Multiband Chirp 6/20 at 1761617666.692
+Continuous Multiband Chirp 7/20 at 1761617667.209
+Continuous Multiband Chirp 8/20 at 1761617667.695
+Continuous Multiband Chirp 9/20 at 1761617668.202
+Continuous Multiband Chirp 10/20 at 1761617668.701
+Continuous Multiband Chirp 11/20 at 1761617669.206
+Continuous Multiband Chirp 12/20 at 1761617669.708
+Continuous Multiband Chirp 13/20 at 1761617670.206
+Continuous Multiband Chirp 14/20 at 1761617670.695
+Continuous Multiband Chirp 15/20 at 1761617671.189
+Continuous Multiband Chirp 16/20 at 1761617671.691
+Continuous Multiband Chirp 17/20 at 1761617672.203
+Continuous Multiband Chirp 18/20 at 1761617672.694
+Continuous Multiband Chirp 19/20 at 1761617673.195
+Continuous Multiband Chirp 20/20 at 1761617673.696
+Continuous Multiband Chirp Sequence Completed at 1761617673.697 (20 chirps total)
