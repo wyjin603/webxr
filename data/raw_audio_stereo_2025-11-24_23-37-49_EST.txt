@@ -1,0 +1,40 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+Stereo Recording Started at 1764045410.953
+Delayed Dualband Chirp Sequence Started at 1764045414.102 (15s delay, then 10Hz for 30s, 10-16kHz)
+Delayed Dualband Chirp Playback Started at 1764045429.103 (after 15s delay)
+Delayed Dualband Chirp 1/300 at 1764045429.203
+Delayed Dualband Chirp 10/300 at 1764045430.104
+Delayed Dualband Chirp 20/300 at 1764045431.107
+Delayed Dualband Chirp 30/300 at 1764045432.111
+Delayed Dualband Chirp 40/300 at 1764045433.112
+Delayed Dualband Chirp 50/300 at 1764045434.106
+Delayed Dualband Chirp 60/300 at 1764045435.107
+Delayed Dualband Chirp 70/300 at 1764045436.111
+Delayed Dualband Chirp 80/300 at 1764045437.103
+Delayed Dualband Chirp 90/300 at 1764045438.108
+Delayed Dualband Chirp 100/300 at 1764045439.109
+Delayed Dualband Chirp 110/300 at 1764045440.112
+Delayed Dualband Chirp 120/300 at 1764045441.103
+Delayed Dualband Chirp 130/300 at 1764045442.107
+Delayed Dualband Chirp 140/300 at 1764045443.123
+Delayed Dualband Chirp 150/300 at 1764045444.111
+Delayed Dualband Chirp 160/300 at 1764045445.116
+Delayed Dualband Chirp 170/300 at 1764045446.106
+Delayed Dualband Chirp 180/300 at 1764045447.11
+Delayed Dualband Chirp 190/300 at 1764045448.103
+Delayed Dualband Chirp 200/300 at 1764045449.104
+Delayed Dualband Chirp 210/300 at 1764045450.107
+Delayed Dualband Chirp 220/300 at 1764045451.117
+Delayed Dualband Chirp 230/300 at 1764045452.103
+Delayed Dualband Chirp 240/300 at 1764045453.105
+Delayed Dualband Chirp 250/300 at 1764045454.107
+Delayed Dualband Chirp 260/300 at 1764045455.11
+Delayed Dualband Chirp 270/300 at 1764045456.103
+Delayed Dualband Chirp 280/300 at 1764045457.108
+Delayed Dualband Chirp 290/300 at 1764045458.109
+Delayed Dualband Chirp 300/300 at 1764045459.112
+Delayed Dualband Chirp Sequence Completed at 1764045459.112 (300 chirps total)
