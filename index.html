@@ -170,6 +170,7 @@
             <button id="play-chirp4-btn" class="secondary-btn">🔊 Play Chirp (2-8kHz)</button>
             <button id="play-continuous-chirp-btn" class="secondary-btn">🔁 Continuous Chirp (2Hz, 10s)</button>
             <button id="play-continuous-multiband-btn" class="secondary-btn">🔁 Continuous Multiband (2Hz, 10s)</button>
+            <button id="play-dualband-10hz-btn" class="secondary-btn">🔁 Dualband Chirp (10Hz, 30s)</button>
             <button id="calibrate-latency-btn" class="secondary-btn">⏱️ Calibrate System Latency</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
             <button id="github-setup-btn" class="secondary-btn">Setup GitHub</button>
@@ -270,6 +271,11 @@
                 this.continuousMultibandTimeout = null;
                 this.continuousMultibandCount = 0;
                 
+                // Dualband chirp playback system (10Hz, 30s)
+                this.dualband10HzInterval = null;
+                this.dualband10HzTimeout = null;
+                this.dualband10HzCount = 0;
+                
                 // System latency measurement
                 this.systemLatency = 0; // measured in milliseconds
                 this.latencyCalibrationStream = null;
@@ -329,6 +335,7 @@
                 this.playChirp4Btn = document.getElementById('play-chirp4-btn');
                 this.playContinuousChirpBtn = document.getElementById('play-continuous-chirp-btn');
                 this.playContinuousMultibandBtn = document.getElementById('play-continuous-multiband-btn');
+                this.playDualband10HzBtn = document.getElementById('play-dualband-10hz-btn');
                 this.calibrateLatencyBtn = document.getElementById('calibrate-latency-btn');
                 this.exportBtn = document.getElementById('export-btn');
                 this.githubSetupBtn = document.getElementById('github-setup-btn');
@@ -446,6 +453,12 @@
                     console.log('Continuous multiband chirp button clicked!');
                     e.preventDefault();
                     this.playContinuousMultiband();
+                });
+                
+                this.playDualband10HzBtn.addEventListener('click', (e) => {
+                    console.log('Dualband 10Hz chirp button clicked!');
+                    e.preventDefault();
+                    this.playDualband10Hz();
                 });
                 
                 this.calibrateLatencyBtn.addEventListener('click', (e) => {
@@ -2950,6 +2963,130 @@
                 }
             }
 
+            async playDualband10Hz() {
+                try {
+                    console.log('Starting dualband chirp playback at 10Hz for 30 seconds...');
+                    
+                    // Ensure chirp is loaded (using chirp3 for multiband/dualband playback)
+                    if (this.chirp3LoadPromise) {
+                        await this.chirp3LoadPromise;
+                    }
+                    
+                    if (!this.chirpAudio3) {
+                        throw new Error('Dualband chirp audio not available for playback');
+                    }
+                    
+                    // Resume audio context if suspended
+                    if (this.chirpPlaybackContext.state === 'suspended') {
+                        await this.chirpPlaybackContext.resume();
+                    }
+                    
+                    // Clear any existing dualband 10Hz playback
+                    this.stopDualband10Hz();
+                    
+                    // Reset counter
+                    this.dualband10HzCount = 0;
+                    
+                    // Update UI
+                    this.playDualband10HzBtn.textContent = '🔁 Playing... (0/300)';
+                    this.playDualband10HzBtn.disabled = true;
+                    
+                    const startTime = Date.now();
+                    const startTimeSeconds = startTime / 1000;
+                    
+                    // Ensure recording start is logged before adding chirp events
+                    this.ensureRecordingStartLogged();
+                    
+                    // Log start of dualband 10Hz chirp sequence
+                    this.chirpTimingLog.push(`Dualband Chirp Sequence Started at ${startTimeSeconds} (10Hz for 30s, 10-16kHz)`);
+                    
+                    // Set up interval for 10Hz (every 100ms)
+                    this.dualband10HzInterval = setInterval(async () => {
+                        try {
+                            const currentTime = Date.now();
+                            const currentTimeSeconds = currentTime / 1000;
+                            
+                            // Create and play chirp
+                            const source = this.chirpPlaybackContext.createBufferSource();
+                            source.buffer = this.chirpAudio3; // Using chirp3 (10-16kHz multiband/dualband)
+                            source.connect(this.chirpPlaybackContext.destination);
+                            source.start();
+                            
+                            this.dualband10HzCount++;
+                            
+                            // Log each chirp in the sequence (log every 10th chirp to avoid spam)
+                            if (this.dualband10HzCount % 10 === 0 || this.dualband10HzCount === 1) {
+                                this.chirpTimingLog.push(`Dualband Chirp ${this.dualband10HzCount}/300 at ${currentTimeSeconds}`);
+                            }
+                            
+                            // Store chirp event in audio data
+                            if (this.audioData) {
+                                this.audioData.push({
+                                    timestamp: currentTime,
+                                    event: 'dualband_10hz_chirp_playback',
+                                    sequence_number: this.dualband10HzCount,
+                                    frequency_range: '10-16kHz',
+                                    duration: this.chirpAudio3.duration * 1000
+                                });
+                            }
+                            
+                            // Update UI with progress (update every 10 chirps to avoid UI lag)
+                            if (this.dualband10HzCount % 10 === 0 || this.dualband10HzCount === 1) {
+                                this.playDualband10HzBtn.textContent = `🔁 Playing... (${this.dualband10HzCount}/300)`;
+                            }
+                            
+                            if (this.dualband10HzCount % 50 === 0) {
+                                console.log(`Dualband chirp ${this.dualband10HzCount}/300 played at ${currentTimeSeconds}`);
+                            }
+                            
+                        } catch (error) {
+                            console.error('Error during dualband 10Hz chirp playback:', error);
+                        }
+                    }, 100); // 10Hz = every 100ms
+                    
+                    // Set timeout to stop after 30 seconds
+                    this.dualband10HzTimeout = setTimeout(() => {
+                        this.stopDualband10Hz();
+                        
+                        const endTime = Date.now();
+                        const endTimeSeconds = endTime / 1000;
+                        
+                        // Log end of sequence
+                        this.chirpTimingLog.push(`Dualband Chirp Sequence Completed at ${endTimeSeconds} (${this.dualband10HzCount} chirps total)`);
+                        
+                        this.updateStatus(`Dualband chirp completed: ${this.dualband10HzCount} chirps in 30 seconds`, 'success');
+                        
+                        // Reset UI
+                        this.playDualband10HzBtn.textContent = '🔁 Dualband Chirp (10Hz, 30s)';
+                        this.playDualband10HzBtn.disabled = false;
+                        
+                    }, 30000); // 30 seconds
+                    
+                    this.updateStatus('Dualband chirp started: 10Hz for 30 seconds', 'success');
+                    
+                } catch (error) {
+                    console.error('Failed to start dualband 10Hz chirp:', error);
+                    this.updateStatus('Failed to start dualband 10Hz chirp: ' + error.message, 'error');
+                    
+                    // Re-enable button on error
+                    this.playDualband10HzBtn.textContent = '🔁 Dualband Chirp (10Hz, 30s)';
+                    this.playDualband10HzBtn.disabled = false;
+                    this.stopDualband10Hz();
+                }
+            }
+
+            stopDualband10Hz() {
+                if (this.dualband10HzInterval) {
+                    clearInterval(this.dualband10HzInterval);
+                    this.dualband10HzInterval = null;
+                }
+                
+                if (this.dualband10HzTimeout) {
+                    clearTimeout(this.dualband10HzTimeout);
+                    this.dualband10HzTimeout = null;
+                }
+            }
+
             async calibrateLatency() {
                 if (this.latencyMeasurementInProgress) {
                     this.updateStatus('Latency measurement already in progress', 'warning');
@@ -3429,11 +3566,13 @@
                 this.playChirp4Btn.textContent = '🔊 Play Chirp (2-8kHz)';
                 this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (2Hz, 10s)';
                 this.playContinuousMultibandBtn.textContent = '🔁 Continuous Multiband (2Hz, 10s)';
+                this.playDualband10HzBtn.textContent = '🔁 Dualband Chirp (10Hz, 30s)';
                 this.calibrateLatencyBtn.textContent = '⏱️ Calibrate System Latency';
                 
                 // Stop any continuous chirp playback and reset latency measurement
                 this.stopContinuousChirp();
                 this.stopContinuousMultiband();
+                this.stopDualband10Hz();
                 this.systemLatency = 0;
                 
                 document.getElementById('imu-data').textContent = 'Data cleared - ready for comprehensive XR data collection';
