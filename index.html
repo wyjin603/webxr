@@ -1213,8 +1213,15 @@
                     // Log the recording start time for chirp timing log
                     this.audioRecordingStartTime = Date.now();
                     const recordingStartTimeSeconds = this.audioRecordingStartTime / 1000;
-                    this.chirpTimingLog.push(`Stereo Recording Started at ${recordingStartTimeSeconds}`);
-                    console.log('Audio recording started, logged timestamp:', recordingStartTimeSeconds);
+                    
+                    // Check if recording start is already logged, if not add it
+                    const hasRecordingStart = this.chirpTimingLog.some(entry => entry.includes('Stereo Recording Started'));
+                    if (!hasRecordingStart) {
+                        this.chirpTimingLog.push(`Stereo Recording Started at ${recordingStartTimeSeconds}`);
+                        console.log('Audio recording started, logged timestamp:', recordingStartTimeSeconds);
+                    } else {
+                        console.log('Audio recording started, recording start already logged');
+                    }
                     
                     this.updateStatus(`Raw PCM recording started at ${this.audioContext.sampleRate}Hz`, 'success');
                     
@@ -1822,51 +1829,7 @@
                     
                     let exportedFiles = [];
                     
-                    // 1. Export XR Pose Data (Head position and orientation)
-                    if (this.xrPoseData.length > 0) {
-                        const csvHeader = 'UnixTime(ms),PosX,PosY,PosZ,OrientX,OrientY,OrientZ,OrientW\n';
-                        const csvContent = csvHeader + this.xrPoseData.join('\n');
-                        const filename = `xr_pose_data_${dateStr}.csv`;
-                        
-                        const csvBlob = new Blob([csvContent], { type: 'text/csv' });
-                        await this.exportToGitHub(csvBlob, filename, 'XR viewer pose data (head position and orientation)');
-                        exportedFiles.push(filename);
-                    }
-                    
-                    // 2. Export XR View Data (Eye-specific transforms)
-                    if (this.xrViewData.length > 0) {
-                        const csvHeader = 'UnixTime(ms),ViewIndex,Eye,EyePosX,EyePosY,EyePosZ,EyeOrientX,EyeOrientY,EyeOrientZ,EyeOrientW\n';
-                        const csvContent = csvHeader + this.xrViewData.join('\n');
-                        const filename = `xr_eye_views_${dateStr}.csv`;
-                        
-                        const csvBlob = new Blob([csvContent], { type: 'text/csv' });
-                        await this.exportToGitHub(csvBlob, filename, 'XR eye view transforms (left/right eye positions and orientations)');
-                        exportedFiles.push(filename);
-                    }
-                    
-                    // 3. Export XR Projection Matrix Data
-                    if (this.xrProjectionData.length > 0) {
-                        const csvHeader = 'UnixTime(ms),ViewIndex,Eye,M00,M01,M02,M03,M10,M11,M12,M13,M20,M21,M22,M23,M30,M31,M32,M33\n';
-                        const csvContent = csvHeader + this.xrProjectionData.join('\n');
-                        const filename = `xr_projection_matrices_${dateStr}.csv`;
-                        
-                        const csvBlob = new Blob([csvContent], { type: 'text/csv' });
-                        await this.exportToGitHub(csvBlob, filename, 'XR projection matrices for stereo rendering');
-                        exportedFiles.push(filename);
-                    }
-                    
-                    // 4. Export IMU data as CSV (derived motion data)
-                    if (this.imuData.length > 0) {
-                        const csvHeader = 'UnixTime(ms),Ax,Ay,Az,Gx,Gy,Gz,QuatW,QuatX,QuatY,QuatZ\n';
-                        const csvContent = csvHeader + this.imuData.join('\n');
-                        const filename = `imu_derived_motion_${dateStr}.csv`;
-                        
-                        const csvBlob = new Blob([csvContent], { type: 'text/csv' });
-                        await this.exportToGitHub(csvBlob, filename, 'Derived IMU motion data (calculated acceleration and gyroscope)');
-                        exportedFiles.push(filename);
-                    }
-                    
-                    // 5. Export Raw PCM Audio as Stereo WAV file
+                    // Export Raw PCM Audio as Stereo WAV file
                     this.validateAudioSamples(); // Ensure structure exists
                     if (this.rawAudioSamples.left.length > 0) {
                         console.log('Exporting raw PCM stereo audio...', {
@@ -1930,7 +1893,7 @@
                         
                         this.updateStatus(`Stereo WAV file exported: ${filename} (${(wavBlob.size / 1024 / 1024).toFixed(2)}MB)`, 'success');
                         
-                        // 6. Export Chirp Timing Log as TXT file (same base name as audio file)
+                        // Export Chirp Timing Log as TXT file (same base name as audio file)
                         if (this.chirpTimingLog.length > 0) {
                             // Prepare TXT content with system latency information
                             let txtContent = '';
@@ -1947,7 +1910,26 @@
                             txtContent += `\n=== Chirp Timing Events ===\n`;
                             
                             // Add all chirp timing events
-                            txtContent += this.chirpTimingLog.join('\n');
+                            // Ensure we have a recording start entry if there are chirp events
+                            let logEntries = [...this.chirpTimingLog];
+                            const hasRecordingStart = logEntries.some(entry => entry.includes('Stereo Recording Started'));
+                            const hasChirpEvents = logEntries.some(entry => entry.includes('Playback Started') || entry.includes('Chirp'));
+                            
+                            if (hasChirpEvents && !hasRecordingStart) {
+                                // Add a recording start entry at the beginning if missing
+                                const firstChirpTime = logEntries.find(entry => entry.includes('Playback Started') || entry.includes('Chirp'));
+                                if (firstChirpTime) {
+                                    // Extract timestamp from first chirp and subtract a small amount
+                                    const timeMatch = firstChirpTime.match(/at ([\d.]+)/);
+                                    if (timeMatch) {
+                                        const firstChirpTimestamp = parseFloat(timeMatch[1]);
+                                        const recordingStartTime = firstChirpTimestamp - 1; // 1 second before first chirp
+                                        logEntries.unshift(`Stereo Recording Started at ${recordingStartTime}`);
+                                    }
+                                }
+                            }
+                            
+                            txtContent += logEntries.join('\n');
                             
                             const txtBlob = new Blob([txtContent], { type: 'text/plain' });
                             const txtFilename = filename.replace('.wav', '.txt'); // Same name as audio file but with .txt extension
@@ -1970,7 +1952,7 @@
                         this.updateStatus('No raw audio samples captured for export', 'warning');
                     }
                     
-                    // 7. Export XR Path Log with comprehensive metadata
+                    // Export XR Path Log with comprehensive metadata
                     console.log('XR Path Log export check:', {
                         xrPathLogLength: this.xrPathLog ? this.xrPathLog.length : 'undefined',
                         sessionMetadata: this.xrSessionMetadata,
@@ -1999,24 +1981,8 @@
                         console.log('No XR path data to export');
                     }
                     
-                    // Export session metadata
-                    const metadata = {
-                        timestamp: timestamp,
-                        sessionDuration: this.sessionStartTime ? (timestamp - this.sessionStartTime) / 1000 : 0,
-                        imuSamples: this.imuData.length,
-                        audioChunks: this.audioChunks.length,
-                        sampleRate: this.audioContext ? this.audioContext.sampleRate : null,
-                        exportedFiles: exportedFiles,
-                        userAgent: navigator.userAgent,
-                        webXRSession: this.xrSession ? 'active' : 'inactive'
-                    };
-                    
-                    const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
-                    const metadataFilename = `session_metadata_${dateStr}.json`;
-                    await this.exportToGitHub(metadataBlob, metadataFilename, 'Session metadata');
-                    
-                    const totalSamples = this.xrPoseData.length + this.xrViewData.length + this.xrProjectionData.length + this.imuData.length;
-                    this.updateStatus(`Comprehensive XR data exported: ${totalSamples} total samples across ${exportedFiles.length} files`, 'success');
+                    const totalFiles = exportedFiles.length;
+                    this.updateStatus(`Data exported successfully: ${totalFiles} file(s) (XR path log, audio, and timing log)`, 'success');
                     
                 } catch (error) {
                     this.updateStatus('Export failed: ' + error.message, 'error');
@@ -2462,6 +2428,16 @@
                 }
             }
 
+            // Helper method to ensure recording start is logged
+            ensureRecordingStartLogged() {
+                const hasRecordingStart = this.chirpTimingLog.some(entry => entry.includes('Stereo Recording Started'));
+                if (!hasRecordingStart) {
+                    const currentTime = Date.now() / 1000;
+                    this.chirpTimingLog.unshift(`Stereo Recording Started at ${currentTime}`);
+                    console.log('Added missing recording start log entry at:', currentTime);
+                }
+            }
+
             async playChirp() {
                 try {
                     console.log('Playing chirp...');
@@ -2489,6 +2465,9 @@
                     const chirpTimestamp = Date.now();
                     const chirpTimestampSeconds = chirpTimestamp / 1000;
                     console.log('Chirp played at timestamp:', chirpTimestamp, 'seconds:', chirpTimestampSeconds);
+                    
+                    // Ensure recording start is logged before adding chirp events
+                    this.ensureRecordingStartLogged();
                     
                     // Add to chirp timing log for TXT export
                     this.chirpTimingLog.push(`FMCW Linear 16-20kHz Playback Started at ${chirpTimestampSeconds}`);
@@ -2556,6 +2535,9 @@
                     const chirpTimestampSeconds = chirpTimestamp / 1000;
                     console.log('Second chirp played at timestamp:', chirpTimestamp, 'seconds:', chirpTimestampSeconds);
                     
+                    // Ensure recording start is logged before adding chirp events
+                    this.ensureRecordingStartLogged();
+                    
                     // Add to chirp timing log for TXT export
                     this.chirpTimingLog.push(`FMCW Linear 8-23kHz Playback Started at ${chirpTimestampSeconds}`);
                     
@@ -2622,6 +2604,9 @@
                     const chirpTimestampSeconds = chirpTimestamp / 1000;
                     console.log('Third chirp played at timestamp:', chirpTimestamp, 'seconds:', chirpTimestampSeconds);
                     
+                    // Ensure recording start is logged before adding chirp events
+                    this.ensureRecordingStartLogged();
+                    
                     // Add to chirp timing log for TXT export
                     this.chirpTimingLog.push(`FMCW Linear 10-16kHz Multiband Playback Started at ${chirpTimestampSeconds}`);
                     
@@ -2687,6 +2672,9 @@
                     const chirpTimestamp = Date.now();
                     const chirpTimestampSeconds = chirpTimestamp / 1000;
                     console.log('Fourth chirp played at timestamp:', chirpTimestamp, 'seconds:', chirpTimestampSeconds);
+                    
+                    // Ensure recording start is logged before adding chirp events
+                    this.ensureRecordingStartLogged();
                     
                     // Add to chirp timing log for TXT export
                     this.chirpTimingLog.push(`FMCW Linear 2-8kHz Playback Started at ${chirpTimestampSeconds}`);
@@ -2756,6 +2744,9 @@
                     
                     const startTime = Date.now();
                     const startTimeSeconds = startTime / 1000;
+                    
+                    // Ensure recording start is logged before adding chirp events
+                    this.ensureRecordingStartLogged();
                     
                     // Log start of continuous chirp sequence
                     this.chirpTimingLog.push(`Continuous Chirp Sequence Started at ${startTimeSeconds} (2Hz for 10s, 2-8kHz)`);
@@ -2871,6 +2862,9 @@
                     
                     const startTime = Date.now();
                     const startTimeSeconds = startTime / 1000;
+                    
+                    // Ensure recording start is logged before adding chirp events
+                    this.ensureRecordingStartLogged();
                     
                     // Log start of continuous multiband chirp sequence
                     this.chirpTimingLog.push(`Continuous Multiband Chirp Sequence Started at ${startTimeSeconds} (2Hz for 10s, 10-16kHz)`);

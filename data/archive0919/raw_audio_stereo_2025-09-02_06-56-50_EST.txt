@@ -1,4 +1,0 @@
-Stereo Recording Started at 1756814191.628
-FMCW Linear 8-23kHz Playback Started at 1756814201.584
-FMCW Linear 8-23kHz Playback Started at 1756814204.918
-FMCW Linear 8-23kHz Playback Started at 1756814207.169
