@@ -171,6 +171,7 @@
             <button id="play-continuous-chirp-btn" class="secondary-btn">🔁 Continuous Chirp (2Hz, 10s)</button>
             <button id="play-continuous-multiband-btn" class="secondary-btn">🔁 Continuous Multiband (2Hz, 10s)</button>
             <button id="play-dualband-10hz-btn" class="secondary-btn">🔁 Dualband Chirp (10Hz, 30s)</button>
+            <button id="play-delayed-dualband-btn" class="secondary-btn">⏸️ Delayed Dualband (15s delay, 10Hz, 30s)</button>
             <button id="calibrate-latency-btn" class="secondary-btn">⏱️ Calibrate System Latency</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
             <button id="github-setup-btn" class="secondary-btn">Setup GitHub</button>
@@ -276,6 +277,13 @@
                 this.dualband10HzTimeout = null;
                 this.dualband10HzCount = 0;
                 
+                // Delayed dualband chirp playback system (15s delay, then 10Hz for 30s)
+                this.delayedDualbandDelayTimeout = null;
+                this.delayedDualbandInterval = null;
+                this.delayedDualbandTimeout = null;
+                this.delayedDualbandCount = 0;
+                this.delayedDualbandDelayStartTime = null;
+                
                 // System latency measurement
                 this.systemLatency = 0; // measured in milliseconds
                 this.latencyCalibrationStream = null;
@@ -336,6 +344,7 @@
                 this.playContinuousChirpBtn = document.getElementById('play-continuous-chirp-btn');
                 this.playContinuousMultibandBtn = document.getElementById('play-continuous-multiband-btn');
                 this.playDualband10HzBtn = document.getElementById('play-dualband-10hz-btn');
+                this.playDelayedDualbandBtn = document.getElementById('play-delayed-dualband-btn');
                 this.calibrateLatencyBtn = document.getElementById('calibrate-latency-btn');
                 this.exportBtn = document.getElementById('export-btn');
                 this.githubSetupBtn = document.getElementById('github-setup-btn');
@@ -459,6 +468,12 @@
                     console.log('Dualband 10Hz chirp button clicked!');
                     e.preventDefault();
                     this.playDualband10Hz();
+                });
+                
+                this.playDelayedDualbandBtn.addEventListener('click', (e) => {
+                    console.log('Delayed dualband chirp button clicked!');
+                    e.preventDefault();
+                    this.playDelayedDualband10Hz();
                 });
                 
                 this.calibrateLatencyBtn.addEventListener('click', (e) => {
@@ -3087,6 +3102,166 @@
                 }
             }
 
+            async playDelayedDualband10Hz() {
+                try {
+                    console.log('Starting delayed dualband chirp: 15s delay, then 10Hz for 30 seconds...');
+                    
+                    // Ensure chirp is loaded (using chirp3 for multiband/dualband playback)
+                    if (this.chirp3LoadPromise) {
+                        await this.chirp3LoadPromise;
+                    }
+                    
+                    if (!this.chirpAudio3) {
+                        throw new Error('Dualband chirp audio not available for playback');
+                    }
+                    
+                    // Resume audio context if suspended
+                    if (this.chirpPlaybackContext.state === 'suspended') {
+                        await this.chirpPlaybackContext.resume();
+                    }
+                    
+                    // Clear any existing delayed dualband playback
+                    this.stopDelayedDualband10Hz();
+                    
+                    // Reset counter
+                    this.delayedDualbandCount = 0;
+                    
+                    // Update UI - show delay countdown
+                    this.playDelayedDualbandBtn.textContent = '⏸️ Waiting... (15s delay)';
+                    this.playDelayedDualbandBtn.disabled = true;
+                    
+                    const startTime = Date.now();
+                    const startTimeSeconds = startTime / 1000;
+                    this.delayedDualbandDelayStartTime = startTime;
+                    
+                    // Ensure recording start is logged before adding chirp events
+                    this.ensureRecordingStartLogged();
+                    
+                    // Log start of delayed dualband chirp sequence
+                    this.chirpTimingLog.push(`Delayed Dualband Chirp Sequence Started at ${startTimeSeconds} (15s delay, then 10Hz for 30s, 10-16kHz)`);
+                    
+                    // Update UI with countdown during delay
+                    let delayCountdown = 15;
+                    const delayCountdownInterval = setInterval(() => {
+                        delayCountdown--;
+                        if (delayCountdown > 0) {
+                            this.playDelayedDualbandBtn.textContent = `⏸️ Waiting... (${delayCountdown}s delay)`;
+                        } else {
+                            clearInterval(delayCountdownInterval);
+                        }
+                    }, 1000);
+                    
+                    // Set timeout for 15 second delay, then start chirp playback
+                    this.delayedDualbandDelayTimeout = setTimeout(() => {
+                        clearInterval(delayCountdownInterval);
+                        
+                        const chirpStartTime = Date.now();
+                        const chirpStartTimeSeconds = chirpStartTime / 1000;
+                        
+                        // Log when chirp playback actually starts
+                        this.chirpTimingLog.push(`Delayed Dualband Chirp Playback Started at ${chirpStartTimeSeconds} (after 15s delay)`);
+                        
+                        // Update UI - show chirp playback progress
+                        this.playDelayedDualbandBtn.textContent = '🔁 Playing... (0/300)';
+                        
+                        // Set up interval for 10Hz (every 100ms)
+                        this.delayedDualbandInterval = setInterval(async () => {
+                            try {
+                                const currentTime = Date.now();
+                                const currentTimeSeconds = currentTime / 1000;
+                                
+                                // Create and play chirp
+                                const source = this.chirpPlaybackContext.createBufferSource();
+                                source.buffer = this.chirpAudio3; // Using chirp3 (10-16kHz multiband/dualband)
+                                source.connect(this.chirpPlaybackContext.destination);
+                                source.start();
+                                
+                                this.delayedDualbandCount++;
+                                
+                                // Log each chirp in the sequence (log every 10th chirp to avoid spam)
+                                if (this.delayedDualbandCount % 10 === 0 || this.delayedDualbandCount === 1) {
+                                    this.chirpTimingLog.push(`Delayed Dualband Chirp ${this.delayedDualbandCount}/300 at ${currentTimeSeconds}`);
+                                }
+                                
+                                // Store chirp event in audio data
+                                if (this.audioData) {
+                                    this.audioData.push({
+                                        timestamp: currentTime,
+                                        event: 'delayed_dualband_10hz_chirp_playback',
+                                        sequence_number: this.delayedDualbandCount,
+                                        frequency_range: '10-16kHz',
+                                        duration: this.chirpAudio3.duration * 1000
+                                    });
+                                }
+                                
+                                // Update UI with progress (update every 10 chirps to avoid UI lag)
+                                if (this.delayedDualbandCount % 10 === 0 || this.delayedDualbandCount === 1) {
+                                    this.playDelayedDualbandBtn.textContent = `🔁 Playing... (${this.delayedDualbandCount}/300)`;
+                                }
+                                
+                                if (this.delayedDualbandCount % 50 === 0) {
+                                    console.log(`Delayed dualband chirp ${this.delayedDualbandCount}/300 played at ${currentTimeSeconds}`);
+                                }
+                                
+                            } catch (error) {
+                                console.error('Error during delayed dualband 10Hz chirp playback:', error);
+                            }
+                        }, 100); // 10Hz = every 100ms
+                        
+                        // Set timeout to stop after 30 seconds of chirp playback
+                        this.delayedDualbandTimeout = setTimeout(() => {
+                            this.stopDelayedDualband10Hz();
+                            
+                            const endTime = Date.now();
+                            const endTimeSeconds = endTime / 1000;
+                            
+                            // Log end of sequence
+                            this.chirpTimingLog.push(`Delayed Dualband Chirp Sequence Completed at ${endTimeSeconds} (${this.delayedDualbandCount} chirps total)`);
+                            
+                            this.updateStatus(`Delayed dualband chirp completed: ${this.delayedDualbandCount} chirps in 30 seconds (after 15s delay)`, 'success');
+                            
+                            // Reset UI
+                            this.playDelayedDualbandBtn.textContent = '⏸️ Delayed Dualband (15s delay, 10Hz, 30s)';
+                            this.playDelayedDualbandBtn.disabled = false;
+                            
+                        }, 30000); // 30 seconds of chirp playback
+                        
+                        this.updateStatus('Delayed dualband chirp playback started: 10Hz for 30 seconds', 'success');
+                        
+                    }, 15000); // 15 second delay
+                    
+                    this.updateStatus('Delayed dualband chirp started: waiting 15 seconds before playback...', 'warning');
+                    
+                } catch (error) {
+                    console.error('Failed to start delayed dualband 10Hz chirp:', error);
+                    this.updateStatus('Failed to start delayed dualband 10Hz chirp: ' + error.message, 'error');
+                    
+                    // Re-enable button on error
+                    this.playDelayedDualbandBtn.textContent = '⏸️ Delayed Dualband (15s delay, 10Hz, 30s)';
+                    this.playDelayedDualbandBtn.disabled = false;
+                    this.stopDelayedDualband10Hz();
+                }
+            }
+
+            stopDelayedDualband10Hz() {
+                if (this.delayedDualbandDelayTimeout) {
+                    clearTimeout(this.delayedDualbandDelayTimeout);
+                    this.delayedDualbandDelayTimeout = null;
+                }
+                
+                if (this.delayedDualbandInterval) {
+                    clearInterval(this.delayedDualbandInterval);
+                    this.delayedDualbandInterval = null;
+                }
+                
+                if (this.delayedDualbandTimeout) {
+                    clearTimeout(this.delayedDualbandTimeout);
+                    this.delayedDualbandTimeout = null;
+                }
+                
+                this.delayedDualbandDelayStartTime = null;
+            }
+
             async calibrateLatency() {
                 if (this.latencyMeasurementInProgress) {
                     this.updateStatus('Latency measurement already in progress', 'warning');
@@ -3567,12 +3742,14 @@
                 this.playContinuousChirpBtn.textContent = '🔁 Continuous Chirp (2Hz, 10s)';
                 this.playContinuousMultibandBtn.textContent = '🔁 Continuous Multiband (2Hz, 10s)';
                 this.playDualband10HzBtn.textContent = '🔁 Dualband Chirp (10Hz, 30s)';
+                this.playDelayedDualbandBtn.textContent = '⏸️ Delayed Dualband (15s delay, 10Hz, 30s)';
                 this.calibrateLatencyBtn.textContent = '⏱️ Calibrate System Latency';
                 
                 // Stop any continuous chirp playback and reset latency measurement
                 this.stopContinuousChirp();
                 this.stopContinuousMultiband();
                 this.stopDualband10Hz();
+                this.stopDelayedDualband10Hz();
                 this.systemLatency = 0;
                 
                 document.getElementById('imu-data').textContent = 'Data cleared - ready for comprehensive XR data collection';
