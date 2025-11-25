@@ -1,0 +1,73 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+Stereo Recording Started at 1764045518.558
+Delayed Dualband Chirp Sequence Started at 1764045520.222 (15s delay, then 10Hz for 30s, 10-16kHz)
+Delayed Dualband Chirp Playback Started at 1764045535.228 (after 15s delay)
+Delayed Dualband Chirp 1/300 at 1764045535.328
+Delayed Dualband Chirp 10/300 at 1764045536.232
+Delayed Dualband Chirp 20/300 at 1764045537.233
+Delayed Dualband Chirp 30/300 at 1764045538.237
+Delayed Dualband Chirp 40/300 at 1764045539.231
+Delayed Dualband Chirp 50/300 at 1764045540.231
+Delayed Dualband Chirp 60/300 at 1764045541.235
+Delayed Dualband Chirp 70/300 at 1764045542.233
+Delayed Dualband Chirp 80/300 at 1764045543.229
+Delayed Dualband Chirp 90/300 at 1764045544.233
+Delayed Dualband Chirp 100/300 at 1764045545.235
+Delayed Dualband Chirp 110/300 at 1764045546.228
+Delayed Dualband Chirp 120/300 at 1764045547.234
+Delayed Dualband Chirp 130/300 at 1764045548.233
+Delayed Dualband Chirp 140/300 at 1764045549.236
+Delayed Dualband Chirp 150/300 at 1764045550.228
+Delayed Dualband Chirp 160/300 at 1764045551.232
+Delayed Dualband Chirp 170/300 at 1764045552.234
+Delayed Dualband Chirp 180/300 at 1764045553.238
+Delayed Dualband Chirp 190/300 at 1764045554.229
+Delayed Dualband Chirp 200/300 at 1764045555.232
+Delayed Dualband Chirp 210/300 at 1764045556.235
+Delayed Dualband Chirp 220/300 at 1764045557.237
+Delayed Dualband Chirp 230/300 at 1764045558.23
+Delayed Dualband Chirp 240/300 at 1764045559.233
+Delayed Dualband Chirp 250/300 at 1764045560.236
+Delayed Dualband Chirp 260/300 at 1764045561.229
+Delayed Dualband Chirp 270/300 at 1764045562.232
+Delayed Dualband Chirp 280/300 at 1764045563.25
+Delayed Dualband Chirp 290/300 at 1764045564.237
+Delayed Dualband Chirp 300/300 at 1764045565.229
+Delayed Dualband Chirp Sequence Completed at 1764045565.23 (300 chirps total)
+Delayed Dualband Chirp Sequence Started at 1764045771.284 (15s delay, then 10Hz for 30s, 10-16kHz)
+Delayed Dualband Chirp Playback Started at 1764045786.285 (after 15s delay)
+Delayed Dualband Chirp 1/300 at 1764045786.386
+Delayed Dualband Chirp 10/300 at 1764045787.287
+Delayed Dualband Chirp 20/300 at 1764045788.291
+Delayed Dualband Chirp 30/300 at 1764045789.302
+Delayed Dualband Chirp 40/300 at 1764045790.294
+Delayed Dualband Chirp 50/300 at 1764045791.286
+Delayed Dualband Chirp 60/300 at 1764045792.287
+Delayed Dualband Chirp 70/300 at 1764045793.289
+Delayed Dualband Chirp 80/300 at 1764045794.289
+Delayed Dualband Chirp 90/300 at 1764045795.291
+Delayed Dualband Chirp 100/300 at 1764045796.295
+Delayed Dualband Chirp 110/300 at 1764045797.286
+Delayed Dualband Chirp 120/300 at 1764045798.286
+Delayed Dualband Chirp 130/300 at 1764045799.288
+Delayed Dualband Chirp 140/300 at 1764045800.289
+Delayed Dualband Chirp 150/300 at 1764045801.292
+Delayed Dualband Chirp 160/300 at 1764045802.293
+Delayed Dualband Chirp 170/300 at 1764045803.286
+Delayed Dualband Chirp 180/300 at 1764045804.286
+Delayed Dualband Chirp 190/300 at 1764045805.288
+Delayed Dualband Chirp 200/300 at 1764045806.29
+Delayed Dualband Chirp 210/300 at 1764045807.292
+Delayed Dualband Chirp 220/300 at 1764045808.394
+Delayed Dualband Chirp 230/300 at 1764045809.386
+Delayed Dualband Chirp 240/300 at 1764045810.388
+Delayed Dualband Chirp 250/300 at 1764045811.389
+Delayed Dualband Chirp 260/300 at 1764045812.392
+Delayed Dualband Chirp 270/300 at 1764045813.394
+Delayed Dualband Chirp 280/300 at 1764045814.386
+Delayed Dualband Chirp 290/300 at 1764045815.387
+Delayed Dualband Chirp Sequence Completed at 1764045816.288 (299 chirps total)
