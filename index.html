@@ -2250,10 +2250,13 @@
                     console.log('Checking mesh data for export...', {
                         hasMeshData: !!this.xrMeshData,
                         meshDataLength: this.xrMeshData ? this.xrMeshData.length : 0,
-                        detectedMeshesSize: this.detectedMeshes ? this.detectedMeshes.size : 0
+                        detectedMeshesSize: this.detectedMeshes ? this.detectedMeshes.size : 0,
+                        xrMeshDataType: typeof this.xrMeshData,
+                        xrMeshDataIsArray: Array.isArray(this.xrMeshData)
                     });
                     
-                    if (this.xrMeshData && this.xrMeshData.length > 0) {
+                    // Always export mesh data file, even if empty (for debugging and tracking)
+                    if (this.xrMeshData !== undefined) {
                         console.log('Exporting XR mesh geometry data...', {
                             meshEntries: this.xrMeshData.length,
                             uniqueMeshes: this.detectedMeshes.size
@@ -2261,7 +2264,8 @@
                         
                         try {
                             // Clean and validate mesh data for JSON serialization
-                            const cleanedMeshData = this.xrMeshData.map(mesh => {
+                            const meshDataArray = Array.isArray(this.xrMeshData) ? this.xrMeshData : [];
+                            const cleanedMeshData = meshDataArray.length > 0 ? meshDataArray.map(mesh => {
                                 return {
                                     timestamp: mesh.timestamp,
                                     meshId: mesh.meshId,
@@ -2284,7 +2288,7 @@
                                     vertices: Array.isArray(mesh.vertices) ? mesh.vertices.map(v => typeof v === 'number' ? v : 0) : [],
                                     indices: Array.isArray(mesh.indices) ? mesh.indices.map(v => typeof v === 'number' ? v : 0) : []
                                 };
-                            });
+                            }) : [];
                             
                             // Create JSON format for mesh data (includes full geometry)
                             const meshDataJson = {
@@ -2329,18 +2333,45 @@
                             this.updateStatus(`Mesh export error: ${meshError.message}`, 'error');
                         }
                     } else {
-                        console.warn('No XR mesh data to export. Possible reasons:');
-                        console.warn('  1. Device does not support mesh-detection feature');
-                        console.warn('  2. Mesh detection not enabled in session options');
-                        console.warn('  3. No meshes detected during session');
-                        console.warn('  4. Mesh data collection failed');
-                        if (this.detectedMeshes && this.detectedMeshes.size > 0) {
-                            console.warn(`  Note: ${this.detectedMeshes.size} meshes were detected but no data entries were collected`);
+                        // xrMeshData is undefined - this shouldn't happen, but create empty file for debugging
+                        console.warn('xrMeshData is undefined - creating empty mesh data file for debugging');
+                        try {
+                            const emptyMeshDataJson = {
+                                sessionId: this.xrSessionMetadata.sessionId || 'unknown',
+                                referenceSpaceType: this.xrSessionMetadata.referenceSpaceType || 'unknown',
+                                metadata: {
+                                    totalMeshEntries: 0,
+                                    uniqueMeshes: 0,
+                                    exportTime: dateStr,
+                                    note: 'No mesh data collected - mesh detection may not be supported or enabled'
+                                },
+                                meshes: []
+                            };
+                            
+                            const emptyMeshJsonBlob = new Blob([JSON.stringify(emptyMeshDataJson, null, 2)], { type: 'application/json' });
+                            const emptyMeshFilename = `xr_mesh_geometry_${dateStr}.json`;
+                            
+                            const exportResult = await this.exportToGitHub(emptyMeshJsonBlob, emptyMeshFilename, 'XR Mesh geometry data (empty - no meshes detected)');
+                            if (exportResult) {
+                                exportedFiles.push(emptyMeshFilename);
+                                console.log(`Empty mesh data file created: ${emptyMeshFilename}`);
+                            }
+                        } catch (error) {
+                            console.error('Error creating empty mesh file:', error);
                         }
                     }
                     
                     // Export XR Plane Data (room geometry for LiDAR matching)
-                    if (this.xrPlaneData && this.xrPlaneData.length > 0) {
+                    console.log('Checking plane data for export...', {
+                        hasPlaneData: !!this.xrPlaneData,
+                        planeDataLength: this.xrPlaneData ? this.xrPlaneData.length : 0,
+                        detectedPlanesSize: this.detectedPlanes ? this.detectedPlanes.size : 0,
+                        xrPlaneDataType: typeof this.xrPlaneData,
+                        xrPlaneDataIsArray: Array.isArray(this.xrPlaneData)
+                    });
+                    
+                    // Always export plane data file, even if empty (for debugging and tracking)
+                    if (this.xrPlaneData !== undefined) {
                         console.log('Exporting XR plane geometry data...', {
                             planeEntries: this.xrPlaneData.length,
                             uniquePlanes: this.detectedPlanes.size
@@ -2348,7 +2379,8 @@
                         
                         try {
                             // Clean and validate plane data for JSON serialization
-                            const cleanedPlaneData = this.xrPlaneData.map(plane => {
+                            const planeDataArray = Array.isArray(this.xrPlaneData) ? this.xrPlaneData : [];
+                            const cleanedPlaneData = planeDataArray.length > 0 ? planeDataArray.map(plane => {
                                 return {
                                     timestamp: plane.timestamp,
                                     planeId: plane.planeId,
@@ -2370,7 +2402,7 @@
                                     matrix: Array.isArray(plane.matrix) ? plane.matrix.map(v => typeof v === 'number' ? v : 0) : null,
                                     polygon: Array.isArray(plane.polygon) ? plane.polygon.map(v => typeof v === 'number' ? v : 0) : []
                                 };
-                            });
+                            }) : [];
                             
                             // Create JSON format for plane data (includes full geometry)
                             const planeDataJson = {
@@ -2415,7 +2447,32 @@
                             this.updateStatus(`Plane export error: ${planeError.message}`, 'error');
                         }
                     } else {
-                        console.log('No XR plane data to export');
+                        // xrPlaneData is undefined - this shouldn't happen, but create empty file for debugging
+                        console.warn('xrPlaneData is undefined - creating empty plane data file for debugging');
+                        try {
+                            const emptyPlaneDataJson = {
+                                sessionId: this.xrSessionMetadata.sessionId || 'unknown',
+                                referenceSpaceType: this.xrSessionMetadata.referenceSpaceType || 'unknown',
+                                metadata: {
+                                    totalPlaneEntries: 0,
+                                    uniquePlanes: 0,
+                                    exportTime: dateStr,
+                                    note: 'No plane data collected - plane detection may not be supported or enabled'
+                                },
+                                planes: []
+                            };
+                            
+                            const emptyPlaneJsonBlob = new Blob([JSON.stringify(emptyPlaneDataJson, null, 2)], { type: 'application/json' });
+                            const emptyPlaneFilename = `xr_plane_geometry_${dateStr}.json`;
+                            
+                            const exportResult = await this.exportToGitHub(emptyPlaneJsonBlob, emptyPlaneFilename, 'XR Plane geometry data (empty - no planes detected)');
+                            if (exportResult) {
+                                exportedFiles.push(emptyPlaneFilename);
+                                console.log(`Empty plane data file created: ${emptyPlaneFilename}`);
+                            }
+                        } catch (error) {
+                            console.error('Error creating empty plane file:', error);
+                        }
                     }
                     
                     const totalFiles = exportedFiles.length;
