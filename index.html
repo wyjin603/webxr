@@ -716,6 +716,9 @@
                         requiredFeatures: [],
                         optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking', 'mesh-detection', 'plane-detection']
                     };
+                    
+                    // Log which features are being requested
+                    console.log('Requesting WebXR session with features:', sessionOptions.optionalFeatures);
 
                     // Try immersive VR first if available
                     try {
@@ -732,12 +735,27 @@
                     // Request the session
                     try {
                         this.xrSession = await navigator.xr.requestSession(sessionMode, sessionOptions);
+                        console.log('WebXR session created successfully with features:', this.xrSession.enabledFeatures);
+                        
+                        // Check if mesh/plane detection features are actually enabled
+                        if (this.xrSession.enabledFeatures) {
+                            const hasMeshDetection = this.xrSession.enabledFeatures.has('mesh-detection');
+                            const hasPlaneDetection = this.xrSession.enabledFeatures.has('plane-detection');
+                            console.log('Mesh detection enabled:', hasMeshDetection);
+                            console.log('Plane detection enabled:', hasPlaneDetection);
+                            
+                            if (!hasMeshDetection || !hasPlaneDetection) {
+                                console.warn('⚠️ Mesh/Plane detection features not enabled. Your device may not support these features.');
+                            }
+                        }
                     } catch (sessionError) {
+                        console.warn('Failed to create session with mesh/plane detection, falling back to basic session:', sessionError);
                         // Fallback to basic inline session
                         sessionMode = 'inline';
                         this.xrSession = await navigator.xr.requestSession(sessionMode, {
                             optionalFeatures: ['local']
                         });
+                        console.warn('⚠️ Using fallback session without mesh/plane detection features');
                     }
 
                     // Create XR layer
@@ -1032,7 +1050,14 @@
 
             // Process detected XRMesh objects (room geometry)
             processDetectedMeshes(frame, timestamp) {
-                if (!frame.detectedMeshes) return;
+                if (!frame.detectedMeshes) {
+                    // Log once per second if mesh detection is not available
+                    if (timestamp - (this.lastMeshLogTime || 0) > 1000) {
+                        console.debug('frame.detectedMeshes not available - mesh detection may not be supported or enabled');
+                        this.lastMeshLogTime = timestamp;
+                    }
+                    return;
+                }
 
                 const referenceSpace = this.xrRefSpace;
                 const currentMeshes = new Set();
@@ -1116,7 +1141,14 @@
 
             // Process detected XRPlane objects (room geometry)
             processDetectedPlanes(frame, timestamp) {
-                if (!frame.detectedPlanes) return;
+                if (!frame.detectedPlanes) {
+                    // Log once per second if plane detection is not available
+                    if (timestamp - (this.lastPlaneLogTime || 0) > 1000) {
+                        console.debug('frame.detectedPlanes not available - plane detection may not be supported or enabled');
+                        this.lastPlaneLogTime = timestamp;
+                    }
+                    return;
+                }
 
                 const referenceSpace = this.xrRefSpace;
                 const currentPlanes = new Set();
@@ -2215,6 +2247,12 @@
                     }
                     
                     // Export XR Mesh Data (room geometry for LiDAR matching)
+                    console.log('Checking mesh data for export...', {
+                        hasMeshData: !!this.xrMeshData,
+                        meshDataLength: this.xrMeshData ? this.xrMeshData.length : 0,
+                        detectedMeshesSize: this.detectedMeshes ? this.detectedMeshes.size : 0
+                    });
+                    
                     if (this.xrMeshData && this.xrMeshData.length > 0) {
                         console.log('Exporting XR mesh geometry data...', {
                             meshEntries: this.xrMeshData.length,
@@ -2291,7 +2329,14 @@
                             this.updateStatus(`Mesh export error: ${meshError.message}`, 'error');
                         }
                     } else {
-                        console.log('No XR mesh data to export');
+                        console.warn('No XR mesh data to export. Possible reasons:');
+                        console.warn('  1. Device does not support mesh-detection feature');
+                        console.warn('  2. Mesh detection not enabled in session options');
+                        console.warn('  3. No meshes detected during session');
+                        console.warn('  4. Mesh data collection failed');
+                        if (this.detectedMeshes && this.detectedMeshes.size > 0) {
+                            console.warn(`  Note: ${this.detectedMeshes.size} meshes were detected but no data entries were collected`);
+                        }
                     }
                     
                     // Export XR Plane Data (room geometry for LiDAR matching)
