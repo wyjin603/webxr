@@ -2221,25 +2221,75 @@
                             uniqueMeshes: this.detectedMeshes.size
                         });
                         
-                        // Create JSON format for mesh data (includes full geometry)
-                        const meshDataJson = {
-                            sessionId: this.xrSessionMetadata.sessionId,
-                            referenceSpaceType: this.xrSessionMetadata.referenceSpaceType,
-                            metadata: {
-                                totalMeshEntries: this.xrMeshData.length,
-                                uniqueMeshes: this.detectedMeshes.size,
-                                exportTime: dateStr
-                            },
-                            meshes: this.xrMeshData
-                        };
-                        
-                        const meshJsonBlob = new Blob([JSON.stringify(meshDataJson, null, 2)], { type: 'application/json' });
-                        const meshFilename = `xr_mesh_geometry_${dateStr}.json`;
-                        
-                        await this.exportToGitHub(meshJsonBlob, meshFilename, 'XR Mesh geometry data for LiDAR matching');
-                        exportedFiles.push(meshFilename);
-                        
-                        console.log(`XR mesh data exported: ${meshFilename}`);
+                        try {
+                            // Clean and validate mesh data for JSON serialization
+                            const cleanedMeshData = this.xrMeshData.map(mesh => {
+                                return {
+                                    timestamp: mesh.timestamp,
+                                    meshId: mesh.meshId,
+                                    semanticLabel: mesh.semanticLabel || 'unknown',
+                                    vertexCount: mesh.vertexCount || 0,
+                                    indexCount: mesh.indexCount || 0,
+                                    lastChangedTime: mesh.lastChangedTime,
+                                    position: {
+                                        x: typeof mesh.position?.x === 'number' ? mesh.position.x : 0,
+                                        y: typeof mesh.position?.y === 'number' ? mesh.position.y : 0,
+                                        z: typeof mesh.position?.z === 'number' ? mesh.position.z : 0
+                                    },
+                                    orientation: {
+                                        x: typeof mesh.orientation?.x === 'number' ? mesh.orientation.x : 0,
+                                        y: typeof mesh.orientation?.y === 'number' ? mesh.orientation.y : 0,
+                                        z: typeof mesh.orientation?.z === 'number' ? mesh.orientation.z : 0,
+                                        w: typeof mesh.orientation?.w === 'number' ? mesh.orientation.w : 1
+                                    },
+                                    matrix: Array.isArray(mesh.matrix) ? mesh.matrix.map(v => typeof v === 'number' ? v : 0) : null,
+                                    vertices: Array.isArray(mesh.vertices) ? mesh.vertices.map(v => typeof v === 'number' ? v : 0) : [],
+                                    indices: Array.isArray(mesh.indices) ? mesh.indices.map(v => typeof v === 'number' ? v : 0) : []
+                                };
+                            });
+                            
+                            // Create JSON format for mesh data (includes full geometry)
+                            const meshDataJson = {
+                                sessionId: this.xrSessionMetadata.sessionId || 'unknown',
+                                referenceSpaceType: this.xrSessionMetadata.referenceSpaceType || 'unknown',
+                                metadata: {
+                                    totalMeshEntries: cleanedMeshData.length,
+                                    uniqueMeshes: this.detectedMeshes ? this.detectedMeshes.size : 0,
+                                    exportTime: dateStr
+                                },
+                                meshes: cleanedMeshData
+                            };
+                            
+                            // Try to stringify with error handling
+                            let jsonString;
+                            try {
+                                jsonString = JSON.stringify(meshDataJson, null, 2);
+                                console.log(`Mesh JSON stringified successfully, size: ${jsonString.length} bytes`);
+                            } catch (stringifyError) {
+                                console.error('JSON.stringify failed for mesh data:', stringifyError);
+                                // Try without formatting for smaller size
+                                jsonString = JSON.stringify(meshDataJson);
+                                if (!jsonString) {
+                                    throw new Error('Failed to stringify mesh data: ' + stringifyError.message);
+                                }
+                            }
+                            
+                            const meshJsonBlob = new Blob([jsonString], { type: 'application/json' });
+                            const meshFilename = `xr_mesh_geometry_${dateStr}.json`;
+                            
+                            console.log(`Mesh blob created: ${meshJsonBlob.size} bytes`);
+                            
+                            const exportResult = await this.exportToGitHub(meshJsonBlob, meshFilename, 'XR Mesh geometry data for LiDAR matching');
+                            if (exportResult) {
+                                exportedFiles.push(meshFilename);
+                                console.log(`XR mesh data exported successfully: ${meshFilename}`);
+                            } else {
+                                console.error(`Failed to export mesh data: ${meshFilename}`);
+                            }
+                        } catch (meshError) {
+                            console.error('Error exporting mesh data:', meshError);
+                            this.updateStatus(`Mesh export error: ${meshError.message}`, 'error');
+                        }
                     } else {
                         console.log('No XR mesh data to export');
                     }
@@ -2251,25 +2301,74 @@
                             uniquePlanes: this.detectedPlanes.size
                         });
                         
-                        // Create JSON format for plane data (includes full geometry)
-                        const planeDataJson = {
-                            sessionId: this.xrSessionMetadata.sessionId,
-                            referenceSpaceType: this.xrSessionMetadata.referenceSpaceType,
-                            metadata: {
-                                totalPlaneEntries: this.xrPlaneData.length,
-                                uniquePlanes: this.detectedPlanes.size,
-                                exportTime: dateStr
-                            },
-                            planes: this.xrPlaneData
-                        };
-                        
-                        const planeJsonBlob = new Blob([JSON.stringify(planeDataJson, null, 2)], { type: 'application/json' });
-                        const planeFilename = `xr_plane_geometry_${dateStr}.json`;
-                        
-                        await this.exportToGitHub(planeJsonBlob, planeFilename, 'XR Plane geometry data for LiDAR matching');
-                        exportedFiles.push(planeFilename);
-                        
-                        console.log(`XR plane data exported: ${planeFilename}`);
+                        try {
+                            // Clean and validate plane data for JSON serialization
+                            const cleanedPlaneData = this.xrPlaneData.map(plane => {
+                                return {
+                                    timestamp: plane.timestamp,
+                                    planeId: plane.planeId,
+                                    semanticLabel: plane.semanticLabel || 'unknown',
+                                    orientation: plane.orientation || 'unknown',
+                                    polygonPointCount: plane.polygonPointCount || 0,
+                                    lastChangedTime: plane.lastChangedTime,
+                                    position: {
+                                        x: typeof plane.position?.x === 'number' ? plane.position.x : 0,
+                                        y: typeof plane.position?.y === 'number' ? plane.position.y : 0,
+                                        z: typeof plane.position?.z === 'number' ? plane.position.z : 0
+                                    },
+                                    orientationQuat: {
+                                        x: typeof plane.orientationQuat?.x === 'number' ? plane.orientationQuat.x : 0,
+                                        y: typeof plane.orientationQuat?.y === 'number' ? plane.orientationQuat.y : 0,
+                                        z: typeof plane.orientationQuat?.z === 'number' ? plane.orientationQuat.z : 0,
+                                        w: typeof plane.orientationQuat?.w === 'number' ? plane.orientationQuat.w : 1
+                                    },
+                                    matrix: Array.isArray(plane.matrix) ? plane.matrix.map(v => typeof v === 'number' ? v : 0) : null,
+                                    polygon: Array.isArray(plane.polygon) ? plane.polygon.map(v => typeof v === 'number' ? v : 0) : []
+                                };
+                            });
+                            
+                            // Create JSON format for plane data (includes full geometry)
+                            const planeDataJson = {
+                                sessionId: this.xrSessionMetadata.sessionId || 'unknown',
+                                referenceSpaceType: this.xrSessionMetadata.referenceSpaceType || 'unknown',
+                                metadata: {
+                                    totalPlaneEntries: cleanedPlaneData.length,
+                                    uniquePlanes: this.detectedPlanes ? this.detectedPlanes.size : 0,
+                                    exportTime: dateStr
+                                },
+                                planes: cleanedPlaneData
+                            };
+                            
+                            // Try to stringify with error handling
+                            let jsonString;
+                            try {
+                                jsonString = JSON.stringify(planeDataJson, null, 2);
+                                console.log(`Plane JSON stringified successfully, size: ${jsonString.length} bytes`);
+                            } catch (stringifyError) {
+                                console.error('JSON.stringify failed for plane data:', stringifyError);
+                                // Try without formatting for smaller size
+                                jsonString = JSON.stringify(planeDataJson);
+                                if (!jsonString) {
+                                    throw new Error('Failed to stringify plane data: ' + stringifyError.message);
+                                }
+                            }
+                            
+                            const planeJsonBlob = new Blob([jsonString], { type: 'application/json' });
+                            const planeFilename = `xr_plane_geometry_${dateStr}.json`;
+                            
+                            console.log(`Plane blob created: ${planeJsonBlob.size} bytes`);
+                            
+                            const exportResult = await this.exportToGitHub(planeJsonBlob, planeFilename, 'XR Plane geometry data for LiDAR matching');
+                            if (exportResult) {
+                                exportedFiles.push(planeFilename);
+                                console.log(`XR plane data exported successfully: ${planeFilename}`);
+                            } else {
+                                console.error(`Failed to export plane data: ${planeFilename}`);
+                            }
+                        } catch (planeError) {
+                            console.error('Error exporting plane data:', planeError);
+                            this.updateStatus(`Plane export error: ${planeError.message}`, 'error');
+                        }
                     } else {
                         console.log('No XR plane data to export');
                     }
@@ -2319,18 +2418,28 @@
                     });
                     
                     if (response.ok) {
-                        console.log(`Successfully uploaded ${filename} to GitHub`);
+                        const result = await response.json();
+                        console.log(`Successfully uploaded ${filename} to GitHub:`, result);
                         this.updateStatus(`✅ ${filename} uploaded to GitHub successfully`, 'success');
                         return true;
                     } else {
-                        const error = await response.json();
-                        console.error('GitHub upload failed:', error);
-                        this.updateStatus(`❌ GitHub upload failed: ${error.message || 'Unknown error'}`, 'error');
+                        let errorMessage = 'Unknown error';
+                        try {
+                            const error = await response.json();
+                            errorMessage = error.message || JSON.stringify(error);
+                            console.error('GitHub upload failed:', error);
+                        } catch (parseError) {
+                            const text = await response.text();
+                            errorMessage = `HTTP ${response.status}: ${text || response.statusText}`;
+                            console.error('GitHub upload failed, response:', text);
+                        }
+                        this.updateStatus(`❌ GitHub upload failed for ${filename}: ${errorMessage}`, 'error');
                         return false;
                     }
                     
                 } catch (error) {
-                    console.error('GitHub export error:', error);
+                    console.error(`GitHub export error for ${filename}:`, error);
+                    this.updateStatus(`❌ Export error for ${filename}: ${error.message || error}`, 'error');
                     return false;
                 }
             }
