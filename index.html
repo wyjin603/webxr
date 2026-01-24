@@ -324,6 +324,16 @@
                 this.xrProjectionData = [];     // Projection matrix data
                 this.xrRawFrameData = [];       // Raw frame data for debugging
                 
+                // Room geometry data storage (for LiDAR matching)
+                this.xrMeshData = [];           // XRMesh geometry data (vertices, indices, poses)
+                this.xrPlaneData = [];          // XRPlane geometry data (polygons, poses, orientations)
+                this.detectedMeshes = new Map(); // Track detected meshes by XRMesh object
+                this.detectedPlanes = new Map(); // Track detected planes by XRPlane object
+                this.lastMeshUpdateTime = 0;
+                this.lastPlaneUpdateTime = 0;
+                this.meshUpdateInterval = 100;  // Update mesh data every 100ms (10Hz)
+                this.planeUpdateInterval = 100; // Update plane data every 100ms (10Hz)
+                
                 this.sessionStartTime = null;
                 this.lastIMUTime = 0;
                 this.imuTargetInterval = 1000 / 800; // 800Hz = 1.25ms intervals
@@ -704,7 +714,7 @@
                     let sessionMode = 'inline';  // Start with inline mode (works without VR)
                     let sessionOptions = {
                         requiredFeatures: [],
-                        optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking']
+                        optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking', 'mesh-detection', 'plane-detection']
                     };
 
                     // Try immersive VR first if available
@@ -998,6 +1008,18 @@
                     }
                 }
 
+                // Process detected meshes (room geometry for LiDAR matching)
+                if (currentTime - this.lastMeshUpdateTime >= this.meshUpdateInterval) {
+                    this.processDetectedMeshes(frame, currentTime);
+                    this.lastMeshUpdateTime = currentTime;
+                }
+
+                // Process detected planes (room geometry for LiDAR matching)
+                if (currentTime - this.lastPlaneUpdateTime >= this.planeUpdateInterval) {
+                    this.processDetectedPlanes(frame, currentTime);
+                    this.lastPlaneUpdateTime = currentTime;
+                }
+
                 // Clear the canvas
                 this.gl.clearColor(0.1, 0.1, 0.2, 1.0);
                 this.gl.clear(this.gl.COLOR_BUFFER_BIT);
@@ -1006,6 +1028,182 @@
                 if (this.isRunning) {
                     this.xrSession.requestAnimationFrame((time, frame) => this.onXRFrame(time, frame));
                 }
+            }
+
+            // Process detected XRMesh objects (room geometry)
+            processDetectedMeshes(frame, timestamp) {
+                if (!frame.detectedMeshes) return;
+
+                const referenceSpace = this.xrRefSpace;
+                const currentMeshes = new Set();
+
+                // Process all detected meshes
+                frame.detectedMeshes.forEach((mesh) => {
+                    currentMeshes.add(mesh);
+                    
+                    // Get mesh pose in reference space
+                    const meshPose = frame.getMeshPose ? frame.getMeshPose(mesh, referenceSpace) : null;
+                    
+                    if (!meshPose) return;
+
+                    // Check if this is a new mesh or an updated one
+                    const existingMesh = this.detectedMeshes.get(mesh);
+                    const isNewMesh = !existingMesh;
+                    const isUpdated = existingMesh && existingMesh.lastChangedTime !== mesh.lastChangedTime;
+
+                    if (isNewMesh || isUpdated) {
+                        // Extract mesh geometry data
+                        const vertices = mesh.vertices ? Array.from(mesh.vertices) : [];
+                        const indices = mesh.indices ? Array.from(mesh.indices) : [];
+                        const semanticLabel = mesh.semanticLabel || 'unknown';
+
+                        // Get transform matrix
+                        const transform = meshPose.transform;
+                        const position = transform.position;
+                        const orientation = transform.orientation;
+                        const matrix = meshPose.transform.matrix ? Array.from(meshPose.transform.matrix) : null;
+
+                        // Create mesh data entry
+                        const meshEntry = {
+                            timestamp: Date.now(),
+                            meshId: existingMesh ? existingMesh.meshId : this.detectedMeshes.size,
+                            semanticLabel: semanticLabel,
+                            vertexCount: vertices.length / 3, // Each vertex has x, y, z
+                            indexCount: indices.length,
+                            lastChangedTime: mesh.lastChangedTime,
+                            position: {
+                                x: position.x,
+                                y: position.y,
+                                z: position.z
+                            },
+                            orientation: {
+                                x: orientation.x,
+                                y: orientation.y,
+                                z: orientation.z,
+                                w: orientation.w
+                            },
+                            matrix: matrix,
+                            vertices: vertices,
+                            indices: indices
+                        };
+
+                        // Store mesh data
+                        this.xrMeshData.push(meshEntry);
+
+                        // Update or create mesh tracking entry
+                        if (!existingMesh) {
+                            this.detectedMeshes.set(mesh, {
+                                meshId: meshEntry.meshId,
+                                lastChangedTime: mesh.lastChangedTime,
+                                firstDetected: Date.now()
+                            });
+                            console.log(`New mesh detected: ID=${meshEntry.meshId}, Label=${semanticLabel}, Vertices=${meshEntry.vertexCount}`);
+                        } else {
+                            existingMesh.lastChangedTime = mesh.lastChangedTime;
+                            console.log(`Mesh updated: ID=${meshEntry.meshId}, Label=${semanticLabel}, Vertices=${meshEntry.vertexCount}`);
+                        }
+                    }
+                });
+
+                // Remove meshes that are no longer detected
+                this.detectedMeshes.forEach((meshContext, mesh) => {
+                    if (!currentMeshes.has(mesh)) {
+                        console.log(`Mesh removed: ID=${meshContext.meshId}`);
+                        this.detectedMeshes.delete(mesh);
+                    }
+                });
+            }
+
+            // Process detected XRPlane objects (room geometry)
+            processDetectedPlanes(frame, timestamp) {
+                if (!frame.detectedPlanes) return;
+
+                const referenceSpace = this.xrRefSpace;
+                const currentPlanes = new Set();
+
+                // Process all detected planes
+                frame.detectedPlanes.forEach((plane) => {
+                    currentPlanes.add(plane);
+                    
+                    // Get plane pose in reference space
+                    // XRPlane has a planeSpace property that is an XRSpace
+                    let planePose = null;
+                    if (plane.planeSpace && frame.getPose) {
+                        try {
+                            planePose = frame.getPose(plane.planeSpace, referenceSpace);
+                        } catch (error) {
+                            console.warn('Error getting plane pose:', error);
+                            return;
+                        }
+                    }
+                    
+                    if (!planePose) return;
+
+                    // Check if this is a new plane or an updated one
+                    const existingPlane = this.detectedPlanes.get(plane);
+                    const isNewPlane = !existingPlane;
+                    const isUpdated = existingPlane && existingPlane.lastChangedTime !== plane.lastChangedTime;
+
+                    if (isNewPlane || isUpdated) {
+                        // Extract plane geometry data
+                        const polygon = plane.polygon ? Array.from(plane.polygon) : [];
+                        const orientation = plane.orientation || 'unknown';
+                        const semanticLabel = plane.semanticLabel || 'unknown';
+
+                        // Get transform matrix
+                        const transform = planePose.transform;
+                        const position = transform.position;
+                        const orientationQuat = transform.orientation;
+                        const matrix = planePose.transform.matrix ? Array.from(planePose.transform.matrix) : null;
+
+                        // Create plane data entry
+                        const planeEntry = {
+                            timestamp: Date.now(),
+                            planeId: existingPlane ? existingPlane.planeId : this.detectedPlanes.size,
+                            semanticLabel: semanticLabel,
+                            orientation: orientation,
+                            polygonPointCount: polygon.length / 3, // Each point has x, y, z
+                            lastChangedTime: plane.lastChangedTime,
+                            position: {
+                                x: position.x,
+                                y: position.y,
+                                z: position.z
+                            },
+                            orientationQuat: {
+                                x: orientationQuat.x,
+                                y: orientationQuat.y,
+                                z: orientationQuat.z,
+                                w: orientationQuat.w
+                            },
+                            matrix: matrix,
+                            polygon: polygon
+                        };
+
+                        // Store plane data
+                        this.xrPlaneData.push(planeEntry);
+
+                        // Update or create plane tracking entry
+                        if (!existingPlane) {
+                            this.detectedPlanes.set(plane, {
+                                planeId: planeEntry.planeId,
+                                lastChangedTime: plane.lastChangedTime,
+                                firstDetected: Date.now()
+                            });
+                            console.log(`New plane detected: ID=${planeEntry.planeId}, Label=${semanticLabel}, Orientation=${orientation}, Points=${planeEntry.polygonPointCount}`);
+                        } else {
+                            existingPlane.lastChangedTime = plane.lastChangedTime;
+                            console.log(`Plane updated: ID=${planeEntry.planeId}, Label=${semanticLabel}, Orientation=${orientation}, Points=${planeEntry.polygonPointCount}`);
+                        }
+                    }
+                });
+
+                // Remove planes that are no longer detected
+                this.detectedPlanes.forEach((planeContext, plane) => {
+                    if (!currentPlanes.has(plane)) {
+                        console.log(`Plane removed: ID=${planeContext.planeId}`);
+                        this.detectedPlanes.delete(plane);
+                    }
+                });
             }
 
             // Determine XR tracking state from pose data
@@ -1668,12 +1866,19 @@
                     <strong>Audio Duration:</strong> ${audioSize.toFixed(2)}s<br>
                     <strong>Audio Sample Rate:</strong> ${this.audioContext ? this.audioContext.sampleRate : 'N/A'}Hz<br>
                     <strong>Chirp Events:</strong> ${this.chirpTimingLog ? this.chirpTimingLog.length : 0}<br>
+                    <strong>Room Geometry (LiDAR Matching):</strong><br>
+                    &nbsp;&nbsp;Detected Meshes: ${this.detectedMeshes ? this.detectedMeshes.size : 0}<br>
+                    &nbsp;&nbsp;Mesh Data Entries: ${this.xrMeshData ? this.xrMeshData.length : 0}<br>
+                    &nbsp;&nbsp;Detected Planes: ${this.detectedPlanes ? this.detectedPlanes.size : 0}<br>
+                    &nbsp;&nbsp;Plane Data Entries: ${this.xrPlaneData ? this.xrPlaneData.length : 0}<br>
                     <strong>Estimated File Sizes:</strong><br>
                     &nbsp;&nbsp;XR Pose CSV: ~${(this.xrPoseData.length * 80 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Views CSV: ~${(this.xrViewData.length * 100 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Projection CSV: ~${(this.xrProjectionData.length * 200 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Path Log CSV: ~${((this.xrPathLog ? this.xrPathLog.length : 0) * 120 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;IMU Motion CSV: ~${(this.imuData.length * 100 / 1024).toFixed(1)}KB<br>
+                    &nbsp;&nbsp;XR Mesh Geometry JSON: ~${(this.xrMeshData ? (JSON.stringify(this.xrMeshData).length / 1024) : 0).toFixed(1)}KB<br>
+                    &nbsp;&nbsp;XR Plane Geometry JSON: ~${(this.xrPlaneData ? (JSON.stringify(this.xrPlaneData).length / 1024) : 0).toFixed(1)}KB<br>
                     &nbsp;&nbsp;Stereo Audio WAV: ~${((leftAudioSamples + rightAudioSamples) * 2 / 1024 / 1024).toFixed(1)}MB
                 `;
                 } catch (error) {
@@ -2009,8 +2214,68 @@
                         console.log('No XR path data to export');
                     }
                     
+                    // Export XR Mesh Data (room geometry for LiDAR matching)
+                    if (this.xrMeshData && this.xrMeshData.length > 0) {
+                        console.log('Exporting XR mesh geometry data...', {
+                            meshEntries: this.xrMeshData.length,
+                            uniqueMeshes: this.detectedMeshes.size
+                        });
+                        
+                        // Create JSON format for mesh data (includes full geometry)
+                        const meshDataJson = {
+                            sessionId: this.xrSessionMetadata.sessionId,
+                            referenceSpaceType: this.xrSessionMetadata.referenceSpaceType,
+                            metadata: {
+                                totalMeshEntries: this.xrMeshData.length,
+                                uniqueMeshes: this.detectedMeshes.size,
+                                exportTime: dateStr
+                            },
+                            meshes: this.xrMeshData
+                        };
+                        
+                        const meshJsonBlob = new Blob([JSON.stringify(meshDataJson, null, 2)], { type: 'application/json' });
+                        const meshFilename = `xr_mesh_geometry_${dateStr}.json`;
+                        
+                        await this.exportToGitHub(meshJsonBlob, meshFilename, 'XR Mesh geometry data for LiDAR matching');
+                        exportedFiles.push(meshFilename);
+                        
+                        console.log(`XR mesh data exported: ${meshFilename}`);
+                    } else {
+                        console.log('No XR mesh data to export');
+                    }
+                    
+                    // Export XR Plane Data (room geometry for LiDAR matching)
+                    if (this.xrPlaneData && this.xrPlaneData.length > 0) {
+                        console.log('Exporting XR plane geometry data...', {
+                            planeEntries: this.xrPlaneData.length,
+                            uniquePlanes: this.detectedPlanes.size
+                        });
+                        
+                        // Create JSON format for plane data (includes full geometry)
+                        const planeDataJson = {
+                            sessionId: this.xrSessionMetadata.sessionId,
+                            referenceSpaceType: this.xrSessionMetadata.referenceSpaceType,
+                            metadata: {
+                                totalPlaneEntries: this.xrPlaneData.length,
+                                uniquePlanes: this.detectedPlanes.size,
+                                exportTime: dateStr
+                            },
+                            planes: this.xrPlaneData
+                        };
+                        
+                        const planeJsonBlob = new Blob([JSON.stringify(planeDataJson, null, 2)], { type: 'application/json' });
+                        const planeFilename = `xr_plane_geometry_${dateStr}.json`;
+                        
+                        await this.exportToGitHub(planeJsonBlob, planeFilename, 'XR Plane geometry data for LiDAR matching');
+                        exportedFiles.push(planeFilename);
+                        
+                        console.log(`XR plane data exported: ${planeFilename}`);
+                    } else {
+                        console.log('No XR plane data to export');
+                    }
+                    
                     const totalFiles = exportedFiles.length;
-                    this.updateStatus(`Data exported successfully: ${totalFiles} file(s) (XR path log, audio, and timing log)`, 'success');
+                    this.updateStatus(`Data exported successfully: ${totalFiles} file(s) (XR path log, audio, timing log, mesh & plane geometry)`, 'success');
                     
                 } catch (error) {
                     this.updateStatus('Export failed: ' + error.message, 'error');
@@ -3726,6 +3991,14 @@
                 this.xrViewData = [];
                 this.xrProjectionData = [];
                 this.xrRawFrameData = [];
+                
+                // Clear room geometry data (mesh and plane)
+                this.xrMeshData = [];
+                this.xrPlaneData = [];
+                this.detectedMeshes.clear();
+                this.detectedPlanes.clear();
+                this.lastMeshUpdateTime = 0;
+                this.lastPlaneUpdateTime = 0;
                 
                 this.sessionStartTime = Date.now();
                 this.lastIMUTime = 0;
