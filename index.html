@@ -136,6 +136,12 @@
     </style>
 </head>
 <body>
+    <!-- Optional DOM overlay for VR (shown in headset when browser supports dom-overlay, e.g. some Android XR browsers) -->
+    <div id="xr-overlay" style="display: none; position: fixed; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; box-sizing: border-box;">
+        <div style="position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; white-space: nowrap;">
+            Use controller: Trigger=Stop, Grip=Export, Buttons=Chirps
+        </div>
+    </div>
     <div class="container">
         <div class="header">
             <h1>🚀 WebXR IMU & Acoustic Data Collector</h1>
@@ -711,51 +717,58 @@
                     }
 
                     // Try different session modes with better error handling
-                    let sessionMode = 'inline';  // Start with inline mode (works without VR)
-                    let sessionOptions = {
-                        requiredFeatures: [],
-                        optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking', 'mesh-detection', 'plane-detection']
-                    };
-                    
-                    // Log which features are being requested
-                    console.log('Requesting WebXR session with features:', sessionOptions.optionalFeatures);
+                    // Start minimal for VIVE/quirky browsers; add features only after confirming support
+                    let sessionMode = 'inline';
+                    let sessionOptions = { requiredFeatures: [], optionalFeatures: [] };
 
                     // Try immersive VR first if available
                     try {
                         const vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
                         if (vrSupported) {
                             sessionMode = 'immersive-vr';
-                            sessionOptions.requiredFeatures = ['local'];
-                            this.updateStatus('VR mode available - trying VR session...', 'warning');
+                            this.updateStatus('VR mode available - trying VR session (minimal features for compatibility)...', 'warning');
                         }
                     } catch (vrError) {
                         console.log('VR not available, using inline mode');
                     }
 
-                    // Request the session
+                    // Request the session: try minimal options first (VIVE XR Elite etc. can reject unknown optional features)
                     try {
-                        this.xrSession = await navigator.xr.requestSession(sessionMode, sessionOptions);
-                        console.log('WebXR session created successfully with features:', this.xrSession.enabledFeatures);
-                        
-                        // Check if mesh/plane detection features are actually enabled
-                        if (this.xrSession.enabledFeatures) {
-                            const hasMeshDetection = this.xrSession.enabledFeatures.has('mesh-detection');
-                            const hasPlaneDetection = this.xrSession.enabledFeatures.has('plane-detection');
-                            console.log('Mesh detection enabled:', hasMeshDetection);
-                            console.log('Plane detection enabled:', hasPlaneDetection);
-                            
-                            if (!hasMeshDetection || !hasPlaneDetection) {
-                                console.warn('⚠️ Mesh/Plane detection features not enabled. Your device may not support these features.');
+                        if (sessionMode === 'immersive-vr') {
+                            // 1) Try with local-floor + optional dom-overlay (for UI in headset)
+                            const overlayRoot = document.getElementById('xr-overlay');
+                            try {
+                                this.xrSession = await navigator.xr.requestSession(sessionMode, {
+                                    requiredFeatures: ['local'],
+                                    optionalFeatures: ['local-floor', 'dom-overlay'],
+                                    domOverlay: overlayRoot ? { root: overlayRoot } : undefined
+                                });
+                                console.log('WebXR session created with local-floor' + (overlayRoot ? ' + dom-overlay' : ''));
+                            } catch (e1) {
+                                // 2) Fallback: local-floor only
+                                try {
+                                    this.xrSession = await navigator.xr.requestSession(sessionMode, {
+                                        requiredFeatures: ['local'],
+                                        optionalFeatures: ['local-floor']
+                                    });
+                                    console.log('WebXR session created with local-floor');
+                                } catch (e2) {
+                                    // 3) Fallback: local only
+                                    this.xrSession = await navigator.xr.requestSession(sessionMode, {
+                                        requiredFeatures: ['local'],
+                                        optionalFeatures: ['local']
+                                    });
+                                    console.log('WebXR session created with local only');
+                                }
                             }
+                        } else {
+                            this.xrSession = await navigator.xr.requestSession(sessionMode, { optionalFeatures: ['local'] });
                         }
+                        console.log('WebXR session enabled features:', this.xrSession.enabledFeatures);
                     } catch (sessionError) {
-                        console.warn('Failed to create session with mesh/plane detection, falling back to basic session:', sessionError);
-                        // Fallback to basic inline session
+                        console.warn('Failed to create VR session, falling back to inline:', sessionError);
                         sessionMode = 'inline';
-                        this.xrSession = await navigator.xr.requestSession(sessionMode, {
-                            optionalFeatures: ['local']
-                        });
-                        console.warn('⚠️ Using fallback session without mesh/plane detection features');
+                        this.xrSession = await navigator.xr.requestSession(sessionMode, { optionalFeatures: ['local'] });
                     }
 
                     // Create XR layer
@@ -918,6 +931,29 @@
             onXRFrame(time, frame) {
                 if (!this.isRunning) return;
 
+                const session = frame.session;
+                const gl = this.gl;
+                const baseLayer = session.renderState.baseLayer;
+
+                const pose = frame.getViewerPose(this.xrRefSpace);
+                if (!pose) {
+                    session.requestAnimationFrame((t, f) => this.onXRFrame(t, f));
+                    return;
+                }
+
+                // Bind XR compositor framebuffer and set per-eye viewports (required for VIVE etc.)
+                if (baseLayer && baseLayer.framebuffer) {
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, baseLayer.framebuffer);
+                    for (const view of pose.views) {
+                        const viewport = baseLayer.getViewport(view);
+                        if (viewport) {
+                            gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+                            gl.clearColor(0.1, 0.1, 0.2, 1.0);
+                            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                        }
+                    }
+                }
+
                 const currentTime = performance.now();
                 
                 // Handle VR controller input
@@ -925,8 +961,6 @@
                 
                 // High-frequency comprehensive XR data collection (800Hz target)
                 if (currentTime - this.lastIMUTime >= this.imuTargetInterval) {
-                    const pose = frame.getViewerPose(this.xrRefSpace);
-                    
                     if (pose) {
                         const timestamp = Date.now();
                         const position = pose.transform.position;
@@ -1037,10 +1071,6 @@
                     this.processDetectedPlanes(frame, currentTime);
                     this.lastPlaneUpdateTime = currentTime;
                 }
-
-                // Clear the canvas
-                this.gl.clearColor(0.1, 0.1, 0.2, 1.0);
-                this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 
                 // Continue the render loop
                 if (this.isRunning) {
