@@ -324,16 +324,6 @@
                 this.xrProjectionData = [];     // Projection matrix data
                 this.xrRawFrameData = [];       // Raw frame data for debugging
                 
-                // Room geometry data storage (for LiDAR matching)
-                this.xrMeshData = [];           // XRMesh geometry data (vertices, indices, poses)
-                this.xrPlaneData = [];          // XRPlane geometry data (polygons, poses, orientations)
-                this.detectedMeshes = new Map(); // Track detected meshes by XRMesh object
-                this.detectedPlanes = new Map(); // Track detected planes by XRPlane object
-                this.lastMeshUpdateTime = 0;
-                this.lastPlaneUpdateTime = 0;
-                this.meshUpdateInterval = 100;  // Update mesh data every 100ms (10Hz)
-                this.planeUpdateInterval = 100; // Update plane data every 100ms (10Hz)
-                
                 this.sessionStartTime = null;
                 this.lastIMUTime = 0;
                 this.imuTargetInterval = 1000 / 800; // 800Hz = 1.25ms intervals
@@ -714,11 +704,8 @@
                     let sessionMode = 'inline';  // Start with inline mode (works without VR)
                     let sessionOptions = {
                         requiredFeatures: [],
-                        optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking', 'mesh-detection', 'plane-detection']
+                        optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking']
                     };
-                    
-                    // Log which features are being requested
-                    console.log('Requesting WebXR session with features:', sessionOptions.optionalFeatures);
 
                     // Try immersive VR first if available
                     try {
@@ -735,27 +722,12 @@
                     // Request the session
                     try {
                         this.xrSession = await navigator.xr.requestSession(sessionMode, sessionOptions);
-                        console.log('WebXR session created successfully with features:', this.xrSession.enabledFeatures);
-                        
-                        // Check if mesh/plane detection features are actually enabled
-                        if (this.xrSession.enabledFeatures) {
-                            const hasMeshDetection = this.xrSession.enabledFeatures.has('mesh-detection');
-                            const hasPlaneDetection = this.xrSession.enabledFeatures.has('plane-detection');
-                            console.log('Mesh detection enabled:', hasMeshDetection);
-                            console.log('Plane detection enabled:', hasPlaneDetection);
-                            
-                            if (!hasMeshDetection || !hasPlaneDetection) {
-                                console.warn('⚠️ Mesh/Plane detection features not enabled. Your device may not support these features.');
-                            }
-                        }
                     } catch (sessionError) {
-                        console.warn('Failed to create session with mesh/plane detection, falling back to basic session:', sessionError);
                         // Fallback to basic inline session
                         sessionMode = 'inline';
                         this.xrSession = await navigator.xr.requestSession(sessionMode, {
                             optionalFeatures: ['local']
                         });
-                        console.warn('⚠️ Using fallback session without mesh/plane detection features');
                     }
 
                     // Create XR layer
@@ -1026,18 +998,6 @@
                     }
                 }
 
-                // Process detected meshes (room geometry for LiDAR matching)
-                if (currentTime - this.lastMeshUpdateTime >= this.meshUpdateInterval) {
-                    this.processDetectedMeshes(frame, currentTime);
-                    this.lastMeshUpdateTime = currentTime;
-                }
-
-                // Process detected planes (room geometry for LiDAR matching)
-                if (currentTime - this.lastPlaneUpdateTime >= this.planeUpdateInterval) {
-                    this.processDetectedPlanes(frame, currentTime);
-                    this.lastPlaneUpdateTime = currentTime;
-                }
-
                 // Clear the canvas
                 this.gl.clearColor(0.1, 0.1, 0.2, 1.0);
                 this.gl.clear(this.gl.COLOR_BUFFER_BIT);
@@ -1046,196 +1006,6 @@
                 if (this.isRunning) {
                     this.xrSession.requestAnimationFrame((time, frame) => this.onXRFrame(time, frame));
                 }
-            }
-
-            // Process detected XRMesh objects (room geometry)
-            processDetectedMeshes(frame, timestamp) {
-                if (!frame.detectedMeshes) {
-                    // Log once per second if mesh detection is not available
-                    if (timestamp - (this.lastMeshLogTime || 0) > 1000) {
-                        console.debug('frame.detectedMeshes not available - mesh detection may not be supported or enabled');
-                        this.lastMeshLogTime = timestamp;
-                    }
-                    return;
-                }
-
-                const referenceSpace = this.xrRefSpace;
-                const currentMeshes = new Set();
-
-                // Process all detected meshes
-                frame.detectedMeshes.forEach((mesh) => {
-                    currentMeshes.add(mesh);
-                    
-                    // Get mesh pose in reference space
-                    const meshPose = frame.getMeshPose ? frame.getMeshPose(mesh, referenceSpace) : null;
-                    
-                    if (!meshPose) return;
-
-                    // Check if this is a new mesh or an updated one
-                    const existingMesh = this.detectedMeshes.get(mesh);
-                    const isNewMesh = !existingMesh;
-                    const isUpdated = existingMesh && existingMesh.lastChangedTime !== mesh.lastChangedTime;
-
-                    if (isNewMesh || isUpdated) {
-                        // Extract mesh geometry data
-                        const vertices = mesh.vertices ? Array.from(mesh.vertices) : [];
-                        const indices = mesh.indices ? Array.from(mesh.indices) : [];
-                        const semanticLabel = mesh.semanticLabel || 'unknown';
-
-                        // Get transform matrix
-                        const transform = meshPose.transform;
-                        const position = transform.position;
-                        const orientation = transform.orientation;
-                        const matrix = meshPose.transform.matrix ? Array.from(meshPose.transform.matrix) : null;
-
-                        // Create mesh data entry
-                        const meshEntry = {
-                            timestamp: Date.now(),
-                            meshId: existingMesh ? existingMesh.meshId : this.detectedMeshes.size,
-                            semanticLabel: semanticLabel,
-                            vertexCount: vertices.length / 3, // Each vertex has x, y, z
-                            indexCount: indices.length,
-                            lastChangedTime: mesh.lastChangedTime,
-                            position: {
-                                x: position.x,
-                                y: position.y,
-                                z: position.z
-                            },
-                            orientation: {
-                                x: orientation.x,
-                                y: orientation.y,
-                                z: orientation.z,
-                                w: orientation.w
-                            },
-                            matrix: matrix,
-                            vertices: vertices,
-                            indices: indices
-                        };
-
-                        // Store mesh data
-                        this.xrMeshData.push(meshEntry);
-
-                        // Update or create mesh tracking entry
-                        if (!existingMesh) {
-                            this.detectedMeshes.set(mesh, {
-                                meshId: meshEntry.meshId,
-                                lastChangedTime: mesh.lastChangedTime,
-                                firstDetected: Date.now()
-                            });
-                            console.log(`New mesh detected: ID=${meshEntry.meshId}, Label=${semanticLabel}, Vertices=${meshEntry.vertexCount}`);
-                        } else {
-                            existingMesh.lastChangedTime = mesh.lastChangedTime;
-                            console.log(`Mesh updated: ID=${meshEntry.meshId}, Label=${semanticLabel}, Vertices=${meshEntry.vertexCount}`);
-                        }
-                    }
-                });
-
-                // Remove meshes that are no longer detected
-                this.detectedMeshes.forEach((meshContext, mesh) => {
-                    if (!currentMeshes.has(mesh)) {
-                        console.log(`Mesh removed: ID=${meshContext.meshId}`);
-                        this.detectedMeshes.delete(mesh);
-                    }
-                });
-            }
-
-            // Process detected XRPlane objects (room geometry)
-            processDetectedPlanes(frame, timestamp) {
-                if (!frame.detectedPlanes) {
-                    // Log once per second if plane detection is not available
-                    if (timestamp - (this.lastPlaneLogTime || 0) > 1000) {
-                        console.debug('frame.detectedPlanes not available - plane detection may not be supported or enabled');
-                        this.lastPlaneLogTime = timestamp;
-                    }
-                    return;
-                }
-
-                const referenceSpace = this.xrRefSpace;
-                const currentPlanes = new Set();
-
-                // Process all detected planes
-                frame.detectedPlanes.forEach((plane) => {
-                    currentPlanes.add(plane);
-                    
-                    // Get plane pose in reference space
-                    // XRPlane has a planeSpace property that is an XRSpace
-                    let planePose = null;
-                    if (plane.planeSpace && frame.getPose) {
-                        try {
-                            planePose = frame.getPose(plane.planeSpace, referenceSpace);
-                        } catch (error) {
-                            console.warn('Error getting plane pose:', error);
-                            return;
-                        }
-                    }
-                    
-                    if (!planePose) return;
-
-                    // Check if this is a new plane or an updated one
-                    const existingPlane = this.detectedPlanes.get(plane);
-                    const isNewPlane = !existingPlane;
-                    const isUpdated = existingPlane && existingPlane.lastChangedTime !== plane.lastChangedTime;
-
-                    if (isNewPlane || isUpdated) {
-                        // Extract plane geometry data
-                        const polygon = plane.polygon ? Array.from(plane.polygon) : [];
-                        const orientation = plane.orientation || 'unknown';
-                        const semanticLabel = plane.semanticLabel || 'unknown';
-
-                        // Get transform matrix
-                        const transform = planePose.transform;
-                        const position = transform.position;
-                        const orientationQuat = transform.orientation;
-                        const matrix = planePose.transform.matrix ? Array.from(planePose.transform.matrix) : null;
-
-                        // Create plane data entry
-                        const planeEntry = {
-                            timestamp: Date.now(),
-                            planeId: existingPlane ? existingPlane.planeId : this.detectedPlanes.size,
-                            semanticLabel: semanticLabel,
-                            orientation: orientation,
-                            polygonPointCount: polygon.length / 3, // Each point has x, y, z
-                            lastChangedTime: plane.lastChangedTime,
-                            position: {
-                                x: position.x,
-                                y: position.y,
-                                z: position.z
-                            },
-                            orientationQuat: {
-                                x: orientationQuat.x,
-                                y: orientationQuat.y,
-                                z: orientationQuat.z,
-                                w: orientationQuat.w
-                            },
-                            matrix: matrix,
-                            polygon: polygon
-                        };
-
-                        // Store plane data
-                        this.xrPlaneData.push(planeEntry);
-
-                        // Update or create plane tracking entry
-                        if (!existingPlane) {
-                            this.detectedPlanes.set(plane, {
-                                planeId: planeEntry.planeId,
-                                lastChangedTime: plane.lastChangedTime,
-                                firstDetected: Date.now()
-                            });
-                            console.log(`New plane detected: ID=${planeEntry.planeId}, Label=${semanticLabel}, Orientation=${orientation}, Points=${planeEntry.polygonPointCount}`);
-                        } else {
-                            existingPlane.lastChangedTime = plane.lastChangedTime;
-                            console.log(`Plane updated: ID=${planeEntry.planeId}, Label=${semanticLabel}, Orientation=${orientation}, Points=${planeEntry.polygonPointCount}`);
-                        }
-                    }
-                });
-
-                // Remove planes that are no longer detected
-                this.detectedPlanes.forEach((planeContext, plane) => {
-                    if (!currentPlanes.has(plane)) {
-                        console.log(`Plane removed: ID=${planeContext.planeId}`);
-                        this.detectedPlanes.delete(plane);
-                    }
-                });
             }
 
             // Determine XR tracking state from pose data
@@ -1898,19 +1668,12 @@
                     <strong>Audio Duration:</strong> ${audioSize.toFixed(2)}s<br>
                     <strong>Audio Sample Rate:</strong> ${this.audioContext ? this.audioContext.sampleRate : 'N/A'}Hz<br>
                     <strong>Chirp Events:</strong> ${this.chirpTimingLog ? this.chirpTimingLog.length : 0}<br>
-                    <strong>Room Geometry (LiDAR Matching):</strong><br>
-                    &nbsp;&nbsp;Detected Meshes: ${this.detectedMeshes ? this.detectedMeshes.size : 0}<br>
-                    &nbsp;&nbsp;Mesh Data Entries: ${this.xrMeshData ? this.xrMeshData.length : 0}<br>
-                    &nbsp;&nbsp;Detected Planes: ${this.detectedPlanes ? this.detectedPlanes.size : 0}<br>
-                    &nbsp;&nbsp;Plane Data Entries: ${this.xrPlaneData ? this.xrPlaneData.length : 0}<br>
                     <strong>Estimated File Sizes:</strong><br>
                     &nbsp;&nbsp;XR Pose CSV: ~${(this.xrPoseData.length * 80 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Views CSV: ~${(this.xrViewData.length * 100 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Projection CSV: ~${(this.xrProjectionData.length * 200 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;XR Path Log CSV: ~${((this.xrPathLog ? this.xrPathLog.length : 0) * 120 / 1024).toFixed(1)}KB<br>
                     &nbsp;&nbsp;IMU Motion CSV: ~${(this.imuData.length * 100 / 1024).toFixed(1)}KB<br>
-                    &nbsp;&nbsp;XR Mesh Geometry JSON: ~${(this.xrMeshData ? (JSON.stringify(this.xrMeshData).length / 1024) : 0).toFixed(1)}KB<br>
-                    &nbsp;&nbsp;XR Plane Geometry JSON: ~${(this.xrPlaneData ? (JSON.stringify(this.xrPlaneData).length / 1024) : 0).toFixed(1)}KB<br>
                     &nbsp;&nbsp;Stereo Audio WAV: ~${((leftAudioSamples + rightAudioSamples) * 2 / 1024 / 1024).toFixed(1)}MB
                 `;
                 } catch (error) {
@@ -2246,237 +2009,8 @@
                         console.log('No XR path data to export');
                     }
                     
-                    // Export XR Mesh Data (room geometry for LiDAR matching)
-                    console.log('Checking mesh data for export...', {
-                        hasMeshData: !!this.xrMeshData,
-                        meshDataLength: this.xrMeshData ? this.xrMeshData.length : 0,
-                        detectedMeshesSize: this.detectedMeshes ? this.detectedMeshes.size : 0,
-                        xrMeshDataType: typeof this.xrMeshData,
-                        xrMeshDataIsArray: Array.isArray(this.xrMeshData)
-                    });
-                    
-                    // Always export mesh data file, even if empty (for debugging and tracking)
-                    if (this.xrMeshData !== undefined) {
-                        console.log('Exporting XR mesh geometry data...', {
-                            meshEntries: this.xrMeshData.length,
-                            uniqueMeshes: this.detectedMeshes.size
-                        });
-                        
-                        try {
-                            // Clean and validate mesh data for JSON serialization
-                            const meshDataArray = Array.isArray(this.xrMeshData) ? this.xrMeshData : [];
-                            const cleanedMeshData = meshDataArray.length > 0 ? meshDataArray.map(mesh => {
-                                return {
-                                    timestamp: mesh.timestamp,
-                                    meshId: mesh.meshId,
-                                    semanticLabel: mesh.semanticLabel || 'unknown',
-                                    vertexCount: mesh.vertexCount || 0,
-                                    indexCount: mesh.indexCount || 0,
-                                    lastChangedTime: mesh.lastChangedTime,
-                                    position: {
-                                        x: typeof mesh.position?.x === 'number' ? mesh.position.x : 0,
-                                        y: typeof mesh.position?.y === 'number' ? mesh.position.y : 0,
-                                        z: typeof mesh.position?.z === 'number' ? mesh.position.z : 0
-                                    },
-                                    orientation: {
-                                        x: typeof mesh.orientation?.x === 'number' ? mesh.orientation.x : 0,
-                                        y: typeof mesh.orientation?.y === 'number' ? mesh.orientation.y : 0,
-                                        z: typeof mesh.orientation?.z === 'number' ? mesh.orientation.z : 0,
-                                        w: typeof mesh.orientation?.w === 'number' ? mesh.orientation.w : 1
-                                    },
-                                    matrix: Array.isArray(mesh.matrix) ? mesh.matrix.map(v => typeof v === 'number' ? v : 0) : null,
-                                    vertices: Array.isArray(mesh.vertices) ? mesh.vertices.map(v => typeof v === 'number' ? v : 0) : [],
-                                    indices: Array.isArray(mesh.indices) ? mesh.indices.map(v => typeof v === 'number' ? v : 0) : []
-                                };
-                            }) : [];
-                            
-                            // Create JSON format for mesh data (includes full geometry)
-                            const meshDataJson = {
-                                sessionId: this.xrSessionMetadata.sessionId || 'unknown',
-                                referenceSpaceType: this.xrSessionMetadata.referenceSpaceType || 'unknown',
-                                metadata: {
-                                    totalMeshEntries: cleanedMeshData.length,
-                                    uniqueMeshes: this.detectedMeshes ? this.detectedMeshes.size : 0,
-                                    exportTime: dateStr
-                                },
-                                meshes: cleanedMeshData
-                            };
-                            
-                            // Try to stringify with error handling
-                            let jsonString;
-                            try {
-                                jsonString = JSON.stringify(meshDataJson, null, 2);
-                                console.log(`Mesh JSON stringified successfully, size: ${jsonString.length} bytes`);
-                            } catch (stringifyError) {
-                                console.error('JSON.stringify failed for mesh data:', stringifyError);
-                                // Try without formatting for smaller size
-                                jsonString = JSON.stringify(meshDataJson);
-                                if (!jsonString) {
-                                    throw new Error('Failed to stringify mesh data: ' + stringifyError.message);
-                                }
-                            }
-                            
-                            const meshJsonBlob = new Blob([jsonString], { type: 'application/json' });
-                            const meshFilename = `xr_mesh_geometry_${dateStr}.json`;
-                            
-                            console.log(`Mesh blob created: ${meshJsonBlob.size} bytes`);
-                            
-                            const exportResult = await this.exportToGitHub(meshJsonBlob, meshFilename, 'XR Mesh geometry data for LiDAR matching');
-                            if (exportResult) {
-                                exportedFiles.push(meshFilename);
-                                console.log(`XR mesh data exported successfully: ${meshFilename}`);
-                            } else {
-                                console.error(`Failed to export mesh data: ${meshFilename}`);
-                            }
-                        } catch (meshError) {
-                            console.error('Error exporting mesh data:', meshError);
-                            this.updateStatus(`Mesh export error: ${meshError.message}`, 'error');
-                        }
-                    } else {
-                        // xrMeshData is undefined - this shouldn't happen, but create empty file for debugging
-                        console.warn('xrMeshData is undefined - creating empty mesh data file for debugging');
-                        try {
-                            const emptyMeshDataJson = {
-                                sessionId: this.xrSessionMetadata.sessionId || 'unknown',
-                                referenceSpaceType: this.xrSessionMetadata.referenceSpaceType || 'unknown',
-                                metadata: {
-                                    totalMeshEntries: 0,
-                                    uniqueMeshes: 0,
-                                    exportTime: dateStr,
-                                    note: 'No mesh data collected - mesh detection may not be supported or enabled'
-                                },
-                                meshes: []
-                            };
-                            
-                            const emptyMeshJsonBlob = new Blob([JSON.stringify(emptyMeshDataJson, null, 2)], { type: 'application/json' });
-                            const emptyMeshFilename = `xr_mesh_geometry_${dateStr}.json`;
-                            
-                            const exportResult = await this.exportToGitHub(emptyMeshJsonBlob, emptyMeshFilename, 'XR Mesh geometry data (empty - no meshes detected)');
-                            if (exportResult) {
-                                exportedFiles.push(emptyMeshFilename);
-                                console.log(`Empty mesh data file created: ${emptyMeshFilename}`);
-                            }
-                        } catch (error) {
-                            console.error('Error creating empty mesh file:', error);
-                        }
-                    }
-                    
-                    // Export XR Plane Data (room geometry for LiDAR matching)
-                    console.log('Checking plane data for export...', {
-                        hasPlaneData: !!this.xrPlaneData,
-                        planeDataLength: this.xrPlaneData ? this.xrPlaneData.length : 0,
-                        detectedPlanesSize: this.detectedPlanes ? this.detectedPlanes.size : 0,
-                        xrPlaneDataType: typeof this.xrPlaneData,
-                        xrPlaneDataIsArray: Array.isArray(this.xrPlaneData)
-                    });
-                    
-                    // Always export plane data file, even if empty (for debugging and tracking)
-                    if (this.xrPlaneData !== undefined) {
-                        console.log('Exporting XR plane geometry data...', {
-                            planeEntries: this.xrPlaneData.length,
-                            uniquePlanes: this.detectedPlanes.size
-                        });
-                        
-                        try {
-                            // Clean and validate plane data for JSON serialization
-                            const planeDataArray = Array.isArray(this.xrPlaneData) ? this.xrPlaneData : [];
-                            const cleanedPlaneData = planeDataArray.length > 0 ? planeDataArray.map(plane => {
-                                return {
-                                    timestamp: plane.timestamp,
-                                    planeId: plane.planeId,
-                                    semanticLabel: plane.semanticLabel || 'unknown',
-                                    orientation: plane.orientation || 'unknown',
-                                    polygonPointCount: plane.polygonPointCount || 0,
-                                    lastChangedTime: plane.lastChangedTime,
-                                    position: {
-                                        x: typeof plane.position?.x === 'number' ? plane.position.x : 0,
-                                        y: typeof plane.position?.y === 'number' ? plane.position.y : 0,
-                                        z: typeof plane.position?.z === 'number' ? plane.position.z : 0
-                                    },
-                                    orientationQuat: {
-                                        x: typeof plane.orientationQuat?.x === 'number' ? plane.orientationQuat.x : 0,
-                                        y: typeof plane.orientationQuat?.y === 'number' ? plane.orientationQuat.y : 0,
-                                        z: typeof plane.orientationQuat?.z === 'number' ? plane.orientationQuat.z : 0,
-                                        w: typeof plane.orientationQuat?.w === 'number' ? plane.orientationQuat.w : 1
-                                    },
-                                    matrix: Array.isArray(plane.matrix) ? plane.matrix.map(v => typeof v === 'number' ? v : 0) : null,
-                                    polygon: Array.isArray(plane.polygon) ? plane.polygon.map(v => typeof v === 'number' ? v : 0) : []
-                                };
-                            }) : [];
-                            
-                            // Create JSON format for plane data (includes full geometry)
-                            const planeDataJson = {
-                                sessionId: this.xrSessionMetadata.sessionId || 'unknown',
-                                referenceSpaceType: this.xrSessionMetadata.referenceSpaceType || 'unknown',
-                                metadata: {
-                                    totalPlaneEntries: cleanedPlaneData.length,
-                                    uniquePlanes: this.detectedPlanes ? this.detectedPlanes.size : 0,
-                                    exportTime: dateStr
-                                },
-                                planes: cleanedPlaneData
-                            };
-                            
-                            // Try to stringify with error handling
-                            let jsonString;
-                            try {
-                                jsonString = JSON.stringify(planeDataJson, null, 2);
-                                console.log(`Plane JSON stringified successfully, size: ${jsonString.length} bytes`);
-                            } catch (stringifyError) {
-                                console.error('JSON.stringify failed for plane data:', stringifyError);
-                                // Try without formatting for smaller size
-                                jsonString = JSON.stringify(planeDataJson);
-                                if (!jsonString) {
-                                    throw new Error('Failed to stringify plane data: ' + stringifyError.message);
-                                }
-                            }
-                            
-                            const planeJsonBlob = new Blob([jsonString], { type: 'application/json' });
-                            const planeFilename = `xr_plane_geometry_${dateStr}.json`;
-                            
-                            console.log(`Plane blob created: ${planeJsonBlob.size} bytes`);
-                            
-                            const exportResult = await this.exportToGitHub(planeJsonBlob, planeFilename, 'XR Plane geometry data for LiDAR matching');
-                            if (exportResult) {
-                                exportedFiles.push(planeFilename);
-                                console.log(`XR plane data exported successfully: ${planeFilename}`);
-                            } else {
-                                console.error(`Failed to export plane data: ${planeFilename}`);
-                            }
-                        } catch (planeError) {
-                            console.error('Error exporting plane data:', planeError);
-                            this.updateStatus(`Plane export error: ${planeError.message}`, 'error');
-                        }
-                    } else {
-                        // xrPlaneData is undefined - this shouldn't happen, but create empty file for debugging
-                        console.warn('xrPlaneData is undefined - creating empty plane data file for debugging');
-                        try {
-                            const emptyPlaneDataJson = {
-                                sessionId: this.xrSessionMetadata.sessionId || 'unknown',
-                                referenceSpaceType: this.xrSessionMetadata.referenceSpaceType || 'unknown',
-                                metadata: {
-                                    totalPlaneEntries: 0,
-                                    uniquePlanes: 0,
-                                    exportTime: dateStr,
-                                    note: 'No plane data collected - plane detection may not be supported or enabled'
-                                },
-                                planes: []
-                            };
-                            
-                            const emptyPlaneJsonBlob = new Blob([JSON.stringify(emptyPlaneDataJson, null, 2)], { type: 'application/json' });
-                            const emptyPlaneFilename = `xr_plane_geometry_${dateStr}.json`;
-                            
-                            const exportResult = await this.exportToGitHub(emptyPlaneJsonBlob, emptyPlaneFilename, 'XR Plane geometry data (empty - no planes detected)');
-                            if (exportResult) {
-                                exportedFiles.push(emptyPlaneFilename);
-                                console.log(`Empty plane data file created: ${emptyPlaneFilename}`);
-                            }
-                        } catch (error) {
-                            console.error('Error creating empty plane file:', error);
-                        }
-                    }
-                    
                     const totalFiles = exportedFiles.length;
-                    this.updateStatus(`Data exported successfully: ${totalFiles} file(s) (XR path log, audio, timing log, mesh & plane geometry)`, 'success');
+                    this.updateStatus(`Data exported successfully: ${totalFiles} file(s) (XR path log, audio, and timing log)`, 'success');
                     
                 } catch (error) {
                     this.updateStatus('Export failed: ' + error.message, 'error');
@@ -2520,28 +2054,18 @@
                     });
                     
                     if (response.ok) {
-                        const result = await response.json();
-                        console.log(`Successfully uploaded ${filename} to GitHub:`, result);
+                        console.log(`Successfully uploaded ${filename} to GitHub`);
                         this.updateStatus(`✅ ${filename} uploaded to GitHub successfully`, 'success');
                         return true;
                     } else {
-                        let errorMessage = 'Unknown error';
-                        try {
-                            const error = await response.json();
-                            errorMessage = error.message || JSON.stringify(error);
-                            console.error('GitHub upload failed:', error);
-                        } catch (parseError) {
-                            const text = await response.text();
-                            errorMessage = `HTTP ${response.status}: ${text || response.statusText}`;
-                            console.error('GitHub upload failed, response:', text);
-                        }
-                        this.updateStatus(`❌ GitHub upload failed for ${filename}: ${errorMessage}`, 'error');
+                        const error = await response.json();
+                        console.error('GitHub upload failed:', error);
+                        this.updateStatus(`❌ GitHub upload failed: ${error.message || 'Unknown error'}`, 'error');
                         return false;
                     }
                     
                 } catch (error) {
-                    console.error(`GitHub export error for ${filename}:`, error);
-                    this.updateStatus(`❌ Export error for ${filename}: ${error.message || error}`, 'error');
+                    console.error('GitHub export error:', error);
                     return false;
                 }
             }
@@ -4202,14 +3726,6 @@
                 this.xrViewData = [];
                 this.xrProjectionData = [];
                 this.xrRawFrameData = [];
-                
-                // Clear room geometry data (mesh and plane)
-                this.xrMeshData = [];
-                this.xrPlaneData = [];
-                this.detectedMeshes.clear();
-                this.detectedPlanes.clear();
-                this.lastMeshUpdateTime = 0;
-                this.lastPlaneUpdateTime = 0;
                 
                 this.sessionStartTime = Date.now();
                 this.lastIMUTime = 0;
