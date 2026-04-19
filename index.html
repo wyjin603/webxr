@@ -2151,7 +2151,31 @@
                     this.updateStatus('Sweep audio loaded successfully', 'success');
                 } catch (error) {
                     console.warn('Could not load sweep file:', error);
-                    this.updateStatus('Sweep file not found - please add sweep_20_20k.wav to project', 'warning');
+                    this.updateStatus('Sweep file could not be decoded - using synthetic fallback', 'warning');
+                    this.generateSyntheticSweep();
+                }
+            }
+
+            generateSyntheticSweep() {
+                try {
+                    const sampleRate = 48000;
+                    const duration = 0.04;
+                    const startFreq = 20;
+                    const endFreq = 20000;
+                    const samples = Math.floor(sampleRate * duration);
+                    this.chirpSweepAudio = this.chirpPlaybackContext.createBuffer(1, samples, sampleRate);
+                    const channelData = this.chirpSweepAudio.getChannelData(0);
+                    for (let i = 0; i < samples; i++) {
+                        const t = i / sampleRate;
+                        const progress = t / duration;
+                        const frequency = startFreq + (endFreq - startFreq) * progress;
+                        const phase = 2 * Math.PI * frequency * t;
+                        const envelope = Math.sin(Math.PI * progress);
+                        channelData[i] = envelope * Math.sin(phase) * 0.5;
+                    }
+                    this.updateStatus('Synthetic sweep generated (20-20kHz, 40ms)', 'success');
+                } catch (error) {
+                    console.error('Failed to generate synthetic sweep:', error);
                 }
             }
 
@@ -2223,6 +2247,15 @@
                 }
             }
 
+            async ensurePlaybackReady() {
+                if (!this.chirpPlaybackContext) {
+                    await this.initializeChirpAudio();
+                }
+                if (!this.chirpPlaybackContext) {
+                    throw new Error('Audio playback context is unavailable');
+                }
+            }
+
             // Helper method to ensure recording start is logged
             ensureRecordingStartLogged() {
                 const hasRecordingStart = this.chirpTimingLog.some(entry => entry.includes('Stereo Recording Started'));
@@ -2236,6 +2269,7 @@
             async playSweep() {
                 try {
                     console.log('Playing sweep...');
+                    await this.ensurePlaybackReady();
                     if (this.sweepLoadPromise) {
                         await this.sweepLoadPromise;
                     }
@@ -2279,6 +2313,7 @@
             async playContinuousMultiband() {
                 try {
                     console.log('Starting continuous multiband chirp playback at 2Hz for 10 seconds...');
+                    await this.ensurePlaybackReady();
                     
                     // Ensure chirp is loaded (using chirp3 for multiband continuous playback)
                     if (this.chirp3LoadPromise) {
@@ -2398,6 +2433,7 @@
             async playContinuousMultiband30() {
                 try {
                     console.log('Starting continuous multiband chirp playback at 2Hz for 30 seconds...');
+                    await this.ensurePlaybackReady();
                     if (this.chirp3LoadPromise) {
                         await this.chirp3LoadPromise;
                     }
@@ -2474,6 +2510,7 @@
             async playDualband10Hz() {
                 try {
                     console.log('Starting dualband chirp playback at 10Hz for 30 seconds...');
+                    await this.ensurePlaybackReady();
                     
                     // Ensure chirp is loaded (using chirp3 for multiband/dualband playback)
                     if (this.chirp3LoadPromise) {
@@ -2609,6 +2646,7 @@
                     
                     console.log('Starting system latency calibration...');
                     this.updateStatus('Starting latency calibration - please ensure microphone is near speakers', 'info');
+                    await this.ensurePlaybackReady();
                     
                     if (this.sweepLoadPromise) {
                         await this.sweepLoadPromise;
