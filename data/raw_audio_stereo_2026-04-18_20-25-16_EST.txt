@@ -1,0 +1,72 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+Stereo Recording Started at 1776561614.471
+Dualband Chirp Sequence Started at 1776561619.556 (10Hz for 30s, 10-16kHz)
+Dualband Chirp 1/300 at 1776561619.659
+Dualband Chirp 10/300 at 1776561620.556
+Dualband Chirp 20/300 at 1776561621.557
+Dualband Chirp 30/300 at 1776561622.56
+Dualband Chirp 40/300 at 1776561623.563
+Dualband Chirp 50/300 at 1776561624.556
+Dualband Chirp 60/300 at 1776561625.556
+Dualband Chirp 70/300 at 1776561626.558
+Dualband Chirp 80/300 at 1776561627.562
+Dualband Chirp 90/300 at 1776561628.557
+Dualband Chirp 100/300 at 1776561629.556
+Dualband Chirp 110/300 at 1776561630.566
+Dualband Chirp 120/300 at 1776561631.56
+Dualband Chirp 130/300 at 1776561632.564
+Dualband Chirp 140/300 at 1776561633.563
+Dualband Chirp 150/300 at 1776561634.556
+Dualband Chirp 160/300 at 1776561635.559
+Dualband Chirp 170/300 at 1776561636.56
+Dualband Chirp 180/300 at 1776561637.563
+Dualband Chirp 190/300 at 1776561638.556
+Dualband Chirp 200/300 at 1776561639.577
+Dualband Chirp 210/300 at 1776561640.559
+Dualband Chirp 220/300 at 1776561641.561
+Dualband Chirp 230/300 at 1776561642.563
+Dualband Chirp 240/300 at 1776561643.557
+Dualband Chirp 250/300 at 1776561644.556
+Dualband Chirp 260/300 at 1776561645.56
+Dualband Chirp 270/300 at 1776561646.562
+Dualband Chirp 280/300 at 1776561647.557
+Dualband Chirp 290/300 at 1776561648.556
+Dualband Chirp 300/300 at 1776561649.562
+Dualband Chirp Sequence Completed at 1776561649.562 (300 chirps total)
+Dualband Chirp Sequence Started at 1776561881.214 (10Hz for 30s, 10-16kHz)
+Dualband Chirp 1/300 at 1776561881.339
+Dualband Chirp 10/300 at 1776561882.216
+Dualband Chirp 20/300 at 1776561883.22
+Dualband Chirp 30/300 at 1776561884.232
+Dualband Chirp 40/300 at 1776561885.214
+Dualband Chirp 50/300 at 1776561886.216
+Dualband Chirp 60/300 at 1776561887.22
+Dualband Chirp 70/300 at 1776561888.224
+Dualband Chirp 80/300 at 1776561889.214
+Dualband Chirp 90/300 at 1776561890.236
+Dualband Chirp 100/300 at 1776561891.216
+Dualband Chirp 110/300 at 1776561892.219
+Dualband Chirp 120/300 at 1776561893.22
+Dualband Chirp 130/300 at 1776561894.214
+Dualband Chirp 140/300 at 1776561895.214
+Dualband Chirp 150/300 at 1776561896.214
+Dualband Chirp 160/300 at 1776561897.214
+Dualband Chirp 170/300 at 1776561898.214
+Dualband Chirp 180/300 at 1776561899.214
+Dualband Chirp 190/300 at 1776561900.214
+Dualband Chirp 200/300 at 1776561901.214
+Dualband Chirp 210/300 at 1776561902.214
+Dualband Chirp 220/300 at 1776561903.214
+Dualband Chirp 230/300 at 1776561904.214
+Dualband Chirp 240/300 at 1776561905.214
+Dualband Chirp 250/300 at 1776561906.214
+Dualband Chirp 260/300 at 1776561907.214
+Dualband Chirp 270/300 at 1776561908.214
+Dualband Chirp 280/300 at 1776561909.214
+Dualband Chirp 290/300 at 1776561910.214
+Dualband Chirp 300/300 at 1776561911.214
+Dualband Chirp Sequence Completed at 1776561911.215 (300 chirps total)
