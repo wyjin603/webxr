@@ -164,6 +164,10 @@
         <div class="controls">
             <button id="init-btn" class="primary-btn">Initialize WebXR</button>
             <button id="start-audio-btn" class="secondary-btn" disabled>Start Audio Analysis</button>
+            <label style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:8px 12px;border-radius:8px;">
+                <input type="checkbox" id="keep-ui-mode-checkbox" checked />
+                <span>Keep browser UI visible (Inline mode)</span>
+            </label>
             <button id="play-sweep-btn" class="secondary-btn">🔊 Play Sweep (20–20kHz)</button>
             <button id="play-continuous-multiband-btn" class="secondary-btn">🔁 Multiband (2Hz, 10s)</button>
             <button id="play-continuous-multiband-30-btn" class="secondary-btn">🔁 Multiband (2Hz, 30s)</button>
@@ -319,6 +323,7 @@
                 // UI elements
                 this.initBtn = document.getElementById('init-btn');
                 this.startAudioBtn = document.getElementById('start-audio-btn');
+                this.keepUiModeCheckbox = document.getElementById('keep-ui-mode-checkbox');
                 this.playSweepBtn = document.getElementById('play-sweep-btn');
                 this.playContinuousMultibandBtn = document.getElementById('play-continuous-multiband-btn');
                 this.playContinuousMultiband30Btn = document.getElementById('play-continuous-multiband-30-btn');
@@ -335,6 +340,7 @@
                 console.log('UI Elements found:', {
                     initBtn: !!this.initBtn,
                     startAudioBtn: !!this.startAudioBtn,
+                    keepUiModeCheckbox: !!this.keepUiModeCheckbox,
                     playSweepBtn: !!this.playSweepBtn,
                     exportBtn: !!this.exportBtn,
                     githubSetupBtn: !!this.githubSetupBtn,
@@ -595,6 +601,14 @@
                 }
             }
 
+            isVisionProDevice() {
+                const ua = navigator.userAgent || '';
+                const platform = navigator.platform || '';
+                // visionOS Safari commonly reports AppleWebKit/Safari + MacIntel touch platform.
+                const looksLikeVisionOS = ua.includes('Vision') || (platform === 'MacIntel' && navigator.maxTouchPoints > 1 && ua.includes('Safari'));
+                return looksLikeVisionOS;
+            }
+
             async toggleWebXR() {
                 console.log('toggleWebXR called, isRunning:', this.isRunning);
                 
@@ -657,16 +671,24 @@
                         optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking']
                     };
 
-                    // Try immersive VR first if available
-                    try {
-                        const vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
-                        if (vrSupported) {
-                            sessionMode = 'immersive-vr';
-                            sessionOptions.requiredFeatures = ['local'];
-                            this.updateStatus('VR mode available - trying VR session...', 'warning');
+                    // Vision Pro UX: keep inline by default so browser UI (record/export buttons) remains accessible.
+                    const isVisionPro = this.isVisionProDevice();
+                    const keepUiMode = this.keepUiModeCheckbox ? this.keepUiModeCheckbox.checked : false;
+                    const forceInlineForUI = keepUiMode || isVisionPro;
+
+                    if (!forceInlineForUI) {
+                        try {
+                            const vrSupported = await navigator.xr.isSessionSupported('immersive-vr');
+                            if (vrSupported) {
+                                sessionMode = 'immersive-vr';
+                                sessionOptions.requiredFeatures = ['local'];
+                                this.updateStatus('VR mode available - trying VR session...', 'warning');
+                            }
+                        } catch (vrError) {
+                            console.log('VR not available, using inline mode');
                         }
-                    } catch (vrError) {
-                        console.log('VR not available, using inline mode');
+                    } else {
+                        this.updateStatus('Using inline mode to keep browser controls visible for audio buttons', 'warning');
                     }
 
                     // Request the session
@@ -729,6 +751,15 @@
                     this.initBtn.textContent = 'Stop WebXR';
                     this.startAudioBtn.disabled = false;
                     this.exportBtn.disabled = false;
+
+                    // On Vision Pro, auto-start recording so user does not lose control flow when entering immersive space.
+                    if (isVisionPro && (!this.audioContext || this.audioContext.state === 'closed')) {
+                        try {
+                            await this.initializeAudio();
+                        } catch (audioError) {
+                            console.warn('Vision Pro auto audio init failed:', audioError);
+                        }
+                    }
                     
                     this.updateStatus(`WebXR session started (${sessionMode} mode)`, 'success');
                     
