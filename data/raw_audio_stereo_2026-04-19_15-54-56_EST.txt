@@ -1,8 +1,0 @@
-=== System Latency Information ===
-System Latency: Not calibrated (use Calibrate System Latency button)
-Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
-
-=== Chirp Timing Events ===
-Stereo Recording Started at 1776632049.793
-Sweep 20-20kHz Playback Started at 1776632053.85
-Sweep 20-20kHz Playback Started at 1776632071.686
