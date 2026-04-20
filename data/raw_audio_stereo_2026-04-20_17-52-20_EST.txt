@@ -1,0 +1,68 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+Stereo Recording Started at 1776725502.479
+Continuous Multiband Chirp Sequence Started at 1776725503.907 (2Hz for 30s, 10-16kHz)
+Continuous Multiband Chirp 1/60 at 1776725504.416
+Continuous Multiband Chirp 2/60 at 1776725504.907
+Continuous Multiband Chirp 3/60 at 1776725505.407
+Continuous Multiband Chirp 4/60 at 1776725505.908
+Continuous Multiband Chirp 5/60 at 1776725506.409
+Continuous Multiband Chirp 6/60 at 1776725506.91
+Continuous Multiband Chirp 7/60 at 1776725507.411
+Continuous Multiband Chirp 8/60 at 1776725507.922
+Continuous Multiband Chirp 9/60 at 1776725508.429
+Continuous Multiband Chirp 10/60 at 1776725508.917
+Continuous Multiband Chirp 11/60 at 1776725509.415
+Continuous Multiband Chirp 12/60 at 1776725509.916
+Continuous Multiband Chirp 13/60 at 1776725510.407
+Continuous Multiband Chirp 14/60 at 1776725510.907
+Continuous Multiband Chirp 15/60 at 1776725511.408
+Continuous Multiband Chirp 16/60 at 1776725511.907
+Continuous Multiband Chirp 17/60 at 1776725512.409
+Continuous Multiband Chirp 18/60 at 1776725512.911
+Continuous Multiband Chirp 19/60 at 1776725513.412
+Continuous Multiband Chirp 20/60 at 1776725513.912
+Continuous Multiband Chirp 21/60 at 1776725514.413
+Continuous Multiband Chirp 22/60 at 1776725514.925
+Continuous Multiband Chirp 23/60 at 1776725515.414
+Continuous Multiband Chirp 24/60 at 1776725515.907
+Continuous Multiband Chirp 25/60 at 1776725516.407
+Continuous Multiband Chirp 26/60 at 1776725516.907
+Continuous Multiband Chirp 27/60 at 1776725517.431
+Continuous Multiband Chirp 28/60 at 1776725517.92
+Continuous Multiband Chirp 29/60 at 1776725518.409
+Continuous Multiband Chirp 30/60 at 1776725518.923
+Continuous Multiband Chirp 31/60 at 1776725519.422
+Continuous Multiband Chirp 32/60 at 1776725519.912
+Continuous Multiband Chirp 33/60 at 1776725520.417
+Continuous Multiband Chirp 34/60 at 1776725520.914
+Continuous Multiband Chirp 35/60 at 1776725521.416
+Continuous Multiband Chirp 36/60 at 1776725521.917
+Continuous Multiband Chirp 37/60 at 1776725522.407
+Continuous Multiband Chirp 38/60 at 1776725522.907
+Continuous Multiband Chirp 39/60 at 1776725523.408
+Continuous Multiband Chirp 40/60 at 1776725523.921
+Continuous Multiband Chirp 41/60 at 1776725524.409
+Continuous Multiband Chirp 42/60 at 1776725524.91
+Continuous Multiband Chirp 43/60 at 1776725525.42
+Continuous Multiband Chirp 44/60 at 1776725525.913
+Continuous Multiband Chirp 45/60 at 1776725526.414
+Continuous Multiband Chirp 46/60 at 1776725526.914
+Continuous Multiband Chirp 47/60 at 1776725527.413
+Continuous Multiband Chirp 48/60 at 1776725527.919
+Continuous Multiband Chirp 49/60 at 1776725528.407
+Continuous Multiband Chirp 50/60 at 1776725528.907
+Continuous Multiband Chirp 51/60 at 1776725529.408
+Continuous Multiband Chirp 52/60 at 1776725529.922
+Continuous Multiband Chirp 53/60 at 1776725530.42
+Continuous Multiband Chirp 54/60 at 1776725530.911
+Continuous Multiband Chirp 55/60 at 1776725531.424
+Continuous Multiband Chirp 56/60 at 1776725531.912
+Continuous Multiband Chirp 57/60 at 1776725532.418
+Continuous Multiband Chirp 58/60 at 1776725532.915
+Continuous Multiband Chirp 59/60 at 1776725533.415
+Continuous Multiband Chirp 60/60 at 1776725533.907
+Continuous Multiband Chirp Sequence Completed at 1776725533.907 (60 chirps total)
