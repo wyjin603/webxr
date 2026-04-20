@@ -2652,7 +2652,7 @@
                         this.updateStatus(`Continuous multiband chirp completed: ${this.continuousMultiband5minCount} chirps in 5 minutes`, 'success');
                         this.playContinuousMultiband5minBtn.textContent = '🔁 Multiband (2Hz, 5min)';
                         this.playContinuousMultiband5minBtn.disabled = false;
-                    }, 300000);
+                    }, 60000);
 
                     this.updateStatus('Continuous multiband chirp started: 2Hz for 5 minutes', 'success');
                 } catch (error) {
