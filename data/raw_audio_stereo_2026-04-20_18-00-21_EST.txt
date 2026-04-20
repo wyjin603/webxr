@@ -1,0 +1,21 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+Stereo Recording Started at 1776725946.785
+Continuous Multiband Chirp Sequence Started at 1776725948.411 (2Hz for 5min, 10-16kHz)
+Continuous Multiband Chirp 1/120 at 1776725948.911
+Continuous Multiband Chirp 10/120 at 1776725953.417
+Continuous Multiband Chirp 20/120 at 1776725958.415
+Continuous Multiband Chirp 30/120 at 1776725963.418
+Continuous Multiband Chirp 40/120 at 1776725968.419
+Continuous Multiband Chirp 50/120 at 1776725973.411
+Continuous Multiband Chirp 60/120 at 1776725978.418
+Continuous Multiband Chirp 70/120 at 1776725983.417
+Continuous Multiband Chirp 80/120 at 1776725988.414
+Continuous Multiband Chirp 90/120 at 1776725993.414
+Continuous Multiband Chirp 100/120 at 1776725998.412
+Continuous Multiband Chirp 110/120 at 1776726003.419
+Continuous Multiband Chirp 120/120 at 1776726008.419
+Continuous Multiband Chirp Sequence Completed at 1776726008.419 (120 chirps total)
