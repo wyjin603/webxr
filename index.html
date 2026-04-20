@@ -165,7 +165,7 @@
             <button id="init-btn" class="primary-btn">Initialize WebXR</button>
             <button id="start-audio-btn" class="secondary-btn" disabled>Start Audio Analysis</button>
             <label style="display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.25);padding:8px 12px;border-radius:8px;">
-                <input type="checkbox" id="keep-ui-mode-checkbox" checked />
+                <input type="checkbox" id="keep-ui-mode-checkbox" />
                 <span>Keep browser UI visible (Inline mode)</span>
             </label>
             <button id="play-sweep-btn" class="secondary-btn">🔊 Play Sweep (20–20kHz)</button>
@@ -335,6 +335,13 @@
                 this.status = document.getElementById('status');
                 this.canvas = document.getElementById('xr-canvas');
                 this.gl = null;
+
+                // Default behavior:
+                // - Vision Pro: keep inline so UI remains accessible.
+                // - Other headsets (Meta/VIVE): prefer immersive for real tracked pose.
+                if (this.keepUiModeCheckbox) {
+                    this.keepUiModeCheckbox.checked = this.isVisionProDevice();
+                }
                 
                 // Validate UI elements were found
                 console.log('UI Elements found:', {
@@ -665,7 +672,7 @@
                     }
 
                     // Try different session modes with better error handling
-                    let sessionMode = 'inline';  // Start with inline mode (works without VR)
+                    let sessionMode = 'inline';
                     let sessionOptions = {
                         requiredFeatures: [],
                         optionalFeatures: ['local', 'local-floor', 'bounded-floor', 'hand-tracking']
@@ -693,11 +700,27 @@
 
                     // Request the session
                     try {
-                        this.xrSession = await navigator.xr.requestSession(sessionMode, sessionOptions);
+                        if (sessionMode === 'immersive-vr') {
+                            // Prefer immersive and retry with minimal options before falling back.
+                            try {
+                                this.xrSession = await navigator.xr.requestSession('immersive-vr', sessionOptions);
+                            } catch (vrSessionError) {
+                                console.warn('Immersive session with full options failed, retrying minimal immersive:', vrSessionError);
+                                this.xrSession = await navigator.xr.requestSession('immersive-vr', {
+                                    requiredFeatures: ['local'],
+                                    optionalFeatures: ['local-floor']
+                                });
+                            }
+                        } else {
+                            this.xrSession = await navigator.xr.requestSession(sessionMode, {
+                                optionalFeatures: ['local']
+                            });
+                        }
                     } catch (sessionError) {
-                        // Fallback to basic inline session
+                        // Final fallback to inline session
+                        console.warn('Immersive unavailable, falling back to inline:', sessionError);
                         sessionMode = 'inline';
-                        this.xrSession = await navigator.xr.requestSession(sessionMode, {
+                        this.xrSession = await navigator.xr.requestSession('inline', {
                             optionalFeatures: ['local']
                         });
                     }
