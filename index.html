@@ -2606,7 +2606,7 @@
                     this.stopDualband10Hz();
 
                     this.continuousMultiband5minCount = 0;
-                    this.playContinuousMultiband5minBtn.textContent = '🔁 Playing... (0/600)';
+                    this.playContinuousMultiband5minBtn.textContent = '🔁 Playing... (0/120)';
                     this.playContinuousMultiband5minBtn.disabled = true;
                     const startTime = Date.now();
                     const startTimeSeconds = startTime / 1000;
@@ -2626,7 +2626,7 @@
 
                             // 5min 数据很多，日志每10次记录一次避免太大
                             if (this.continuousMultiband5minCount % 10 === 0 || this.continuousMultiband5minCount === 1) {
-                                this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultiband5minCount}/600 at ${currentTimeSeconds}`);
+                                this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultiband5minCount}/120 at ${currentTimeSeconds}`);
                             }
 
                             if (this.audioData) {
@@ -2638,7 +2638,7 @@
                                     duration: this.chirpAudio3.duration * 1000
                                 });
                             }
-                            this.playContinuousMultiband5minBtn.textContent = `🔁 Playing... (${this.continuousMultiband5minCount}/600)`;
+                            this.playContinuousMultiband5minBtn.textContent = `🔁 Playing... (${this.continuousMultiband5minCount}/120)`;
                         } catch (error) {
                             console.error('Error during continuous multiband 5min playback:', error);
                         }
