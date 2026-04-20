@@ -171,6 +171,7 @@
             <button id="play-sweep-btn" class="secondary-btn">🔊 Play Sweep (20–20kHz)</button>
             <button id="play-continuous-multiband-btn" class="secondary-btn">🔁 Multiband (2Hz, 10s)</button>
             <button id="play-continuous-multiband-30-btn" class="secondary-btn">🔁 Multiband (2Hz, 30s)</button>
+            <button id="play-continuous-multiband-5min-btn" class="secondary-btn">🔁 Multiband (2Hz, 5min)</button>
             <button id="play-dualband-10hz-btn" class="secondary-btn">🔁 Multiband (10Hz, 30s)</button>
             <button id="calibrate-latency-btn" class="secondary-btn">⏱️ Calibrate System Latency</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
@@ -264,6 +265,10 @@
                 this.continuousMultiband30Interval = null;
                 this.continuousMultiband30Timeout = null;
                 this.continuousMultiband30Count = 0;
+
+                this.continuousMultiband5minInterval = null;
+                this.continuousMultiband5minTimeout = null;
+                this.continuousMultiband5minCount = 0;
                 
                 // Dualband chirp playback system (10Hz, 30s)
                 this.dualband10HzInterval = null;
@@ -327,6 +332,7 @@
                 this.playSweepBtn = document.getElementById('play-sweep-btn');
                 this.playContinuousMultibandBtn = document.getElementById('play-continuous-multiband-btn');
                 this.playContinuousMultiband30Btn = document.getElementById('play-continuous-multiband-30-btn');
+                this.playContinuousMultiband5minBtn = document.getElementById('play-continuous-multiband-5min-btn');
                 this.playDualband10HzBtn = document.getElementById('play-dualband-10hz-btn');
                 this.calibrateLatencyBtn = document.getElementById('calibrate-latency-btn');
                 this.exportBtn = document.getElementById('export-btn');
@@ -434,6 +440,12 @@
                     console.log('Continuous multiband 30s button clicked!');
                     e.preventDefault();
                     this.playContinuousMultiband30();
+                });
+
+                this.playContinuousMultiband5minBtn.addEventListener('click', (e) => {
+                    console.log('Continuous multiband 5min button clicked!');
+                    e.preventDefault();
+                    this.playContinuousMultiband5min();
                 });
                 
                 this.playDualband10HzBtn.addEventListener('click', (e) => {
@@ -2511,6 +2523,7 @@
                     }
                     this.stopContinuousMultiband();
                     this.stopContinuousMultiband30();
+                    this.stopContinuousMultiband5min();
                     this.stopDualband10Hz();
                     this.continuousMultiband30Count = 0;
                     this.playContinuousMultiband30Btn.textContent = '🔁 Playing... (0/60)';
@@ -2573,6 +2586,95 @@
                 }
             }
 
+            async playContinuousMultiband5min() {
+                try {
+                    console.log('Starting continuous multiband chirp playback at 2Hz for 5 minutes...');
+                    await this.ensurePlaybackReady();
+                    if (this.chirp3LoadPromise) {
+                        await this.chirp3LoadPromise;
+                    }
+                    if (!this.chirpAudio3) {
+                        throw new Error('Multiband chirp audio not available for continuous playback');
+                    }
+                    if (this.chirpPlaybackContext.state === 'suspended') {
+                        await this.chirpPlaybackContext.resume();
+                    }
+
+                    this.stopContinuousMultiband();
+                    this.stopContinuousMultiband30();
+                    this.stopContinuousMultiband5min();
+                    this.stopDualband10Hz();
+
+                    this.continuousMultiband5minCount = 0;
+                    this.playContinuousMultiband5minBtn.textContent = '🔁 Playing... (0/600)';
+                    this.playContinuousMultiband5minBtn.disabled = true;
+                    const startTime = Date.now();
+                    const startTimeSeconds = startTime / 1000;
+                    this.ensureRecordingStartLogged();
+                    this.chirpTimingLog.push(`Continuous Multiband Chirp Sequence Started at ${startTimeSeconds} (2Hz for 5min, 10-16kHz)`);
+
+                    this.continuousMultiband5minInterval = setInterval(async () => {
+                        try {
+                            const currentTime = Date.now();
+                            const currentTimeSeconds = currentTime / 1000;
+                            const source = this.chirpPlaybackContext.createBufferSource();
+                            source.buffer = this.chirpAudio3;
+                            source.connect(this.chirpPlaybackContext.destination);
+                            source.start();
+
+                            this.continuousMultiband5minCount++;
+
+                            // 5min 数据很多，日志每10次记录一次避免太大
+                            if (this.continuousMultiband5minCount % 10 === 0 || this.continuousMultiband5minCount === 1) {
+                                this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultiband5minCount}/600 at ${currentTimeSeconds}`);
+                            }
+
+                            if (this.audioData) {
+                                this.audioData.push({
+                                    timestamp: currentTime,
+                                    event: 'continuous_multiband_chirp_playback_5min',
+                                    sequence_number: this.continuousMultiband5minCount,
+                                    frequency_range: '10-16kHz',
+                                    duration: this.chirpAudio3.duration * 1000
+                                });
+                            }
+                            this.playContinuousMultiband5minBtn.textContent = `🔁 Playing... (${this.continuousMultiband5minCount}/600)`;
+                        } catch (error) {
+                            console.error('Error during continuous multiband 5min playback:', error);
+                        }
+                    }, 500);
+
+                    this.continuousMultiband5minTimeout = setTimeout(() => {
+                        this.stopContinuousMultiband5min();
+                        const endTime = Date.now();
+                        const endTimeSeconds = endTime / 1000;
+                        this.chirpTimingLog.push(`Continuous Multiband Chirp Sequence Completed at ${endTimeSeconds} (${this.continuousMultiband5minCount} chirps total)`);
+                        this.updateStatus(`Continuous multiband chirp completed: ${this.continuousMultiband5minCount} chirps in 5 minutes`, 'success');
+                        this.playContinuousMultiband5minBtn.textContent = '🔁 Multiband (2Hz, 5min)';
+                        this.playContinuousMultiband5minBtn.disabled = false;
+                    }, 300000);
+
+                    this.updateStatus('Continuous multiband chirp started: 2Hz for 5 minutes', 'success');
+                } catch (error) {
+                    console.error('Failed to start continuous multiband 5min:', error);
+                    this.updateStatus('Failed to start continuous multiband 5min: ' + error.message, 'error');
+                    this.playContinuousMultiband5minBtn.textContent = '🔁 Multiband (2Hz, 5min)';
+                    this.playContinuousMultiband5minBtn.disabled = false;
+                    this.stopContinuousMultiband5min();
+                }
+            }
+
+            stopContinuousMultiband5min() {
+                if (this.continuousMultiband5minInterval) {
+                    clearInterval(this.continuousMultiband5minInterval);
+                    this.continuousMultiband5minInterval = null;
+                }
+                if (this.continuousMultiband5minTimeout) {
+                    clearTimeout(this.continuousMultiband5minTimeout);
+                    this.continuousMultiband5minTimeout = null;
+                }
+            }
+
             async playDualband10Hz() {
                 try {
                     console.log('Starting dualband chirp playback at 10Hz for 30 seconds...');
@@ -2594,6 +2696,7 @@
                     
                     this.stopContinuousMultiband();
                     this.stopContinuousMultiband30();
+                    this.stopContinuousMultiband5min();
                     this.stopDualband10Hz();
                     
                     // Reset counter
@@ -3149,11 +3252,13 @@
                 this.playSweepBtn.textContent = '🔊 Play Sweep (20–20kHz)';
                 this.playContinuousMultibandBtn.textContent = '🔁 Multiband (2Hz, 10s)';
                 this.playContinuousMultiband30Btn.textContent = '🔁 Multiband (2Hz, 30s)';
+                this.playContinuousMultiband5minBtn.textContent = '🔁 Multiband (2Hz, 5min)';
                 this.playDualband10HzBtn.textContent = '🔁 Multiband (10Hz, 30s)';
                 this.calibrateLatencyBtn.textContent = '⏱️ Calibrate System Latency';
                 
                 this.stopContinuousMultiband();
                 this.stopContinuousMultiband30();
+                this.stopContinuousMultiband5min();
                 this.stopDualband10Hz();
                 this.systemLatency = 0;
                 
