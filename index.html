@@ -175,6 +175,9 @@
             <button id="play-continuous-multiband-30-btn" class="secondary-btn">🔁 Multiband (2Hz, 30s)</button>
             <button id="play-continuous-multiband-5min-btn" class="secondary-btn">🔁 Multiband (2Hz, 5min)</button>
             <button id="play-dualband-10hz-btn" class="secondary-btn">🔁 Multiband (10Hz, 30s)</button>
+            <button id="play-dualband-2hz-hvac-btn" class="secondary-btn">🔁 Dualband+HVAC (2Hz, 150s)</button>
+            <button id="play-dualband-2hz-music-btn" class="secondary-btn">🔁 Dualband+Music (2Hz, 150s)</button>
+            <button id="play-dualband-2hz-podcast-btn" class="secondary-btn">🔁 Dualband+Podcast (2Hz, 150s)</button>
             <button id="calibrate-latency-btn" class="secondary-btn">⏱️ Calibrate System Latency</button>
             <button id="export-btn" class="secondary-btn" disabled>Export Data</button>
             <button id="github-setup-btn" class="secondary-btn">Setup Supabase</button>
@@ -279,6 +282,12 @@
                 this.continuousMultiband5minInterval = null;
                 this.continuousMultiband5minTimeout = null;
                 this.continuousMultiband5minCount = 0;
+
+                // Dualband 2Hz + background audio playback system (150s)
+                this.dualband2HzBgInterval = null;
+                this.dualband2HzBgTimeout = null;
+                this.dualband2HzBgCount = 0;
+                this.backgroundAudioElement = null;
                 
                 // Dualband chirp playback system (10Hz, 30s)
                 this.dualband10HzInterval = null;
@@ -344,6 +353,9 @@
                 this.playContinuousMultiband30Btn = document.getElementById('play-continuous-multiband-30-btn');
                 this.playContinuousMultiband5minBtn = document.getElementById('play-continuous-multiband-5min-btn');
                 this.playDualband10HzBtn = document.getElementById('play-dualband-10hz-btn');
+                this.playDualband2HzHvacBtn = document.getElementById('play-dualband-2hz-hvac-btn');
+                this.playDualband2HzMusicBtn = document.getElementById('play-dualband-2hz-music-btn');
+                this.playDualband2HzPodcastBtn = document.getElementById('play-dualband-2hz-podcast-btn');
                 this.calibrateLatencyBtn = document.getElementById('calibrate-latency-btn');
                 this.exportBtn = document.getElementById('export-btn');
                 this.githubSetupBtn = document.getElementById('github-setup-btn');
@@ -463,6 +475,21 @@
                     console.log('Dualband 10Hz chirp button clicked!');
                     e.preventDefault();
                     this.playDualband10Hz();
+                });
+
+                this.playDualband2HzHvacBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.playDualband2HzWithBackground('HVAC', './hvac.mp3', this.playDualband2HzHvacBtn);
+                });
+
+                this.playDualband2HzMusicBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.playDualband2HzWithBackground('Instrumental', './instrumental.mp3', this.playDualband2HzMusicBtn);
+                });
+
+                this.playDualband2HzPodcastBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.playDualband2HzWithBackground('Podcast', './podcast.mp3', this.playDualband2HzPodcastBtn);
                 });
                 
                 this.calibrateLatencyBtn.addEventListener('click', (e) => {
@@ -2804,6 +2831,100 @@
                 }
             }
 
+            stopDualband2HzWithBackground() {
+                if (this.dualband2HzBgInterval) {
+                    clearInterval(this.dualband2HzBgInterval);
+                    this.dualband2HzBgInterval = null;
+                }
+                if (this.dualband2HzBgTimeout) {
+                    clearTimeout(this.dualband2HzBgTimeout);
+                    this.dualband2HzBgTimeout = null;
+                }
+                if (this.backgroundAudioElement) {
+                    this.backgroundAudioElement.pause();
+                    this.backgroundAudioElement.currentTime = 0;
+                    this.backgroundAudioElement = null;
+                }
+                if (this.playDualband2HzHvacBtn) this.playDualband2HzHvacBtn.disabled = false;
+                if (this.playDualband2HzMusicBtn) this.playDualband2HzMusicBtn.disabled = false;
+                if (this.playDualband2HzPodcastBtn) this.playDualband2HzPodcastBtn.disabled = false;
+                if (this.playDualband2HzHvacBtn) this.playDualband2HzHvacBtn.textContent = '🔁 Dualband+HVAC (2Hz, 150s)';
+                if (this.playDualband2HzMusicBtn) this.playDualband2HzMusicBtn.textContent = '🔁 Dualband+Music (2Hz, 150s)';
+                if (this.playDualband2HzPodcastBtn) this.playDualband2HzPodcastBtn.textContent = '🔁 Dualband+Podcast (2Hz, 150s)';
+            }
+
+            async playDualband2HzWithBackground(label, audioPath, buttonEl) {
+                try {
+                    await this.ensurePlaybackReady();
+                    if (this.chirp3LoadPromise) {
+                        await this.chirp3LoadPromise;
+                    }
+                    if (!this.chirpAudio3) {
+                        throw new Error('Dualband chirp audio not available for playback');
+                    }
+                    if (this.chirpPlaybackContext.state === 'suspended') {
+                        await this.chirpPlaybackContext.resume();
+                    }
+
+                    this.stopContinuousMultiband();
+                    this.stopContinuousMultiband30();
+                    this.stopContinuousMultiband5min();
+                    this.stopDualband10Hz();
+                    this.stopDualband2HzWithBackground();
+
+                    // Start background audio and chirp sequence together
+                    this.backgroundAudioElement = new Audio(audioPath);
+                    this.backgroundAudioElement.loop = false;
+                    this.backgroundAudioElement.play().catch((e) => {
+                        console.warn(`Background ${label} audio start failed:`, e);
+                    });
+
+                    this.dualband2HzBgCount = 0;
+                    buttonEl.textContent = '🔁 Playing... (0/300)';
+                    buttonEl.disabled = true;
+                    if (buttonEl !== this.playDualband2HzHvacBtn) this.playDualband2HzHvacBtn.disabled = true;
+                    if (buttonEl !== this.playDualband2HzMusicBtn) this.playDualband2HzMusicBtn.disabled = true;
+                    if (buttonEl !== this.playDualband2HzPodcastBtn) this.playDualband2HzPodcastBtn.disabled = true;
+
+                    const startTime = Date.now();
+                    const startTimeSeconds = startTime / 1000;
+                    this.ensureRecordingStartLogged();
+                    this.chirpTimingLog.push(`Dualband 2Hz + ${label} Started at ${startTimeSeconds} (2Hz for 150s, 10-16kHz)`);
+
+                    this.dualband2HzBgInterval = setInterval(() => {
+                        try {
+                            const currentTime = Date.now();
+                            const currentTimeSeconds = currentTime / 1000;
+                            const source = this.chirpPlaybackContext.createBufferSource();
+                            source.buffer = this.chirpAudio3;
+                            source.connect(this.chirpPlaybackContext.destination);
+                            source.start();
+
+                            this.dualband2HzBgCount++;
+                            if (this.dualband2HzBgCount % 10 === 0 || this.dualband2HzBgCount === 1) {
+                                this.chirpTimingLog.push(`Dualband 2Hz + ${label} Chirp ${this.dualband2HzBgCount}/300 at ${currentTimeSeconds}`);
+                            }
+                            buttonEl.textContent = `🔁 Playing... (${this.dualband2HzBgCount}/300)`;
+                        } catch (error) {
+                            console.error('Error during dualband 2Hz + background playback:', error);
+                        }
+                    }, 500);
+
+                    this.dualband2HzBgTimeout = setTimeout(() => {
+                        this.stopDualband2HzWithBackground();
+                        const endTimeSeconds = Date.now() / 1000;
+                        this.chirpTimingLog.push(`Dualband 2Hz + ${label} Completed at ${endTimeSeconds} (${this.dualband2HzBgCount} chirps total)`);
+                        this.updateStatus(`Dualband 2Hz + ${label} completed (150s)`, 'success');
+                    }, 150000);
+
+                    this.updateStatus(`Dualband 2Hz + ${label} started for 150s`, 'success');
+                } catch (error) {
+                    console.error(`Failed to start Dualband 2Hz + ${label}:`, error);
+                    this.updateStatus(`Failed to start Dualband 2Hz + ${label}: ${error.message}`, 'error');
+                    this.stopDualband2HzWithBackground();
+                }
+            }
+
             async calibrateLatency() {
                 if (this.latencyMeasurementInProgress) {
                     this.updateStatus('Latency measurement already in progress', 'warning');
@@ -3256,12 +3377,16 @@
                 this.playContinuousMultiband30Btn.textContent = '🔁 Multiband (2Hz, 30s)';
                 this.playContinuousMultiband5minBtn.textContent = '🔁 Multiband (2Hz, 5min)';
                 this.playDualband10HzBtn.textContent = '🔁 Multiband (10Hz, 30s)';
+                this.playDualband2HzHvacBtn.textContent = '🔁 Dualband+HVAC (2Hz, 150s)';
+                this.playDualband2HzMusicBtn.textContent = '🔁 Dualband+Music (2Hz, 150s)';
+                this.playDualband2HzPodcastBtn.textContent = '🔁 Dualband+Podcast (2Hz, 150s)';
                 this.calibrateLatencyBtn.textContent = '⏱️ Calibrate System Latency';
                 
                 this.stopContinuousMultiband();
                 this.stopContinuousMultiband30();
                 this.stopContinuousMultiband5min();
                 this.stopDualband10Hz();
+                this.stopDualband2HzWithBackground();
                 this.systemLatency = 0;
                 
                 document.getElementById('imu-data').textContent = 'Data cleared - ready for comprehensive XR data collection';
