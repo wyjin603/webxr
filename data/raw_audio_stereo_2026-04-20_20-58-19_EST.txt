@@ -1,0 +1,39 @@
+=== System Latency Information ===
+System Latency: Not calibrated (use Calibrate System Latency button)
+Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.
+
+=== Chirp Timing Events ===
+Stereo Recording Started at 1776736534.187
+Continuous Multiband Chirp Sequence Started at 1776736535.694 (2Hz for 5min, 10-16kHz)
+Continuous Multiband Chirp 1/300 at 1776736536.203
+Continuous Multiband Chirp 10/300 at 1776736540.7
+Continuous Multiband Chirp 20/300 at 1776736545.7
+Continuous Multiband Chirp 30/300 at 1776736550.697
+Continuous Multiband Chirp 40/300 at 1776736555.696
+Continuous Multiband Chirp 50/300 at 1776736560.695
+Continuous Multiband Chirp 60/300 at 1776736565.694
+Continuous Multiband Chirp 70/300 at 1776736570.702
+Continuous Multiband Chirp 80/300 at 1776736575.7
+Continuous Multiband Chirp 90/300 at 1776736580.699
+Continuous Multiband Chirp 100/300 at 1776736585.695
+Continuous Multiband Chirp 110/300 at 1776736590.696
+Continuous Multiband Chirp 120/300 at 1776736595.694
+Continuous Multiband Chirp 130/300 at 1776736600.694
+Continuous Multiband Chirp 140/300 at 1776736605.694
+Continuous Multiband Chirp 150/300 at 1776736610.701
+Continuous Multiband Chirp 160/300 at 1776736615.701
+Continuous Multiband Chirp 170/300 at 1776736620.699
+Continuous Multiband Chirp 180/300 at 1776736625.696
+Continuous Multiband Chirp 190/300 at 1776736630.695
+Continuous Multiband Chirp 200/300 at 1776736635.694
+Continuous Multiband Chirp 210/300 at 1776736640.694
+Continuous Multiband Chirp 220/300 at 1776736645.694
+Continuous Multiband Chirp 230/300 at 1776736650.694
+Continuous Multiband Chirp 240/300 at 1776736655.698
+Continuous Multiband Chirp 250/300 at 1776736660.697
+Continuous Multiband Chirp 260/300 at 1776736665.695
+Continuous Multiband Chirp 270/300 at 1776736670.694
+Continuous Multiband Chirp 280/300 at 1776736675.694
+Continuous Multiband Chirp 290/300 at 1776736680.694
+Continuous Multiband Chirp 300/300 at 1776736685.694
+Continuous Multiband Chirp Sequence Completed at 1776736685.695 (300 chirps total)
