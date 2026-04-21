@@ -160,6 +160,8 @@
         <div id="status" class="status warning">
             Ready to start - Click "Initialize WebXR" to begin
         </div>
+        <div id="export-error" class="status error" style="display: none; white-space: pre-wrap;">
+        </div>
 
         <div class="controls">
             <button id="init-btn" class="primary-btn">Initialize WebXR</button>
@@ -347,6 +349,7 @@
                 this.githubSetupBtn = document.getElementById('github-setup-btn');
                 this.clearBtn = document.getElementById('clear-btn');
                 this.status = document.getElementById('status');
+                this.exportError = document.getElementById('export-error');
                 this.canvas = document.getElementById('xr-canvas');
                 this.gl = null;
 
@@ -1860,6 +1863,7 @@
                 });
                 
                 try {
+                    this.clearExportError();
                     this.updateStatus('Preparing data export...', 'warning');
                     
                     const timestamp = Date.now();
@@ -2037,6 +2041,7 @@
                     this.updateStatus(`Data exported successfully: ${totalFiles} file(s) (XR path log, audio, and timing log)`, 'success');
                     
                 } catch (error) {
+                    this.setExportError('Export failed: ' + (error.message || String(error)));
                     this.updateStatus('Export failed: ' + error.message, 'error');
                     console.error('Export error:', error);
                 }
@@ -2068,18 +2073,35 @@
                     
                     if (response.ok) {
                         console.log(`Successfully uploaded ${filename} to Supabase bucket ${supabaseBucket}`);
+                        this.clearExportError();
                         this.updateStatus(`✅ ${filename} uploaded to Supabase`, 'success');
                         return true;
                     } else {
                         const errorText = await response.text();
                         console.error('Supabase upload failed:', errorText);
+                        this.setExportError(`Upload failed for ${filename}\nBucket: ${supabaseBucket}\nResponse: ${errorText || response.status}`);
                         this.updateStatus(`❌ Supabase upload failed: ${errorText || response.status}`, 'error');
                         return false;
                     }
                     
                 } catch (error) {
                     console.error('Supabase export error:', error);
+                    this.setExportError(`Upload exception for ${filename}\n${error.message || String(error)}`);
                     return false;
+                }
+            }
+
+            setExportError(message) {
+                if (this.exportError) {
+                    this.exportError.textContent = message;
+                    this.exportError.style.display = 'block';
+                }
+            }
+
+            clearExportError() {
+                if (this.exportError) {
+                    this.exportError.textContent = '';
+                    this.exportError.style.display = 'none';
                 }
             }
 
