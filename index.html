@@ -310,6 +310,15 @@
                 // Chirp timing log for TXT file export
                 this.chirpTimingLog = [];
                 this.audioRecordingStartTime = null;
+                // Lead time for explicitly scheduled chirps. Must be long
+                // enough to clear the render deadline and far shorter than the
+                // chirp period (100 ms at the fastest setting used).
+                this.CHIRP_SCHEDULE_LEAD = 0.03;
+                this.sessionMetadata = null;
+                this.chirpAssetInfo = null;
+                this.chirpAssetFailed = false;
+                this.captureGaps = [];
+                this.captureSummary = null;
                 
                 // XR Path Logging with comprehensive metadata
                 this.xrPathLog = [];
@@ -1304,6 +1313,13 @@
                     } else {
                         console.log('Audio recording started, recording start already logged');
                     }
+
+                    // Pair the wall clock to the capture context's own clock, and
+                    // record what the browser actually delivered: without these the
+                    // sample index cannot be turned back into a UnixTime, and a
+                    // device-to-device difference cannot be attributed.
+                    this.recordSessionMetadata(stream);
+                    this.logClockSync('capture_start', this.audioContext);
                     
                     this.updateStatus(`Raw PCM recording started at ${this.audioContext.sampleRate}Hz`, 'success');
                     
@@ -1411,6 +1427,25 @@
                     const { type, samplesLeft, samplesRight, samples, sampleRate, channelCount, duration } = event.data;
                     
                     switch (type) {
+                        case 'captureGap':
+                            // A missed render quantum: that audio is gone and the
+                            // worklet has filled it with silence to keep later
+                            // samples at their true offsets. Record it.
+                            this.captureGaps.push(event.data);
+                            console.warn('[capture gap]', event.data.missing,
+                                'frames at', event.data.atFrame);
+                            break;
+
+                        case 'captureSummary':
+                            this.captureSummary = event.data;
+                            console.log('[capture summary]', event.data);
+                            if (event.data.filledFrames > 0) {
+                                this.updateStatus(`Capture had ${event.data.dropEvents} gap(s), `
+                                    + `${event.data.filledFrames} frames filled with silence`,
+                                    'warning');
+                            }
+                            break;
+
                         case 'recordingStarted':
                             console.log('Raw PCM recording started via AudioWorklet:', channelCount || 1, 'channels');
                             this.audioChannelCount = channelCount || 1;
@@ -1421,14 +1456,14 @@
                             this.validateAudioSamples(); // Ensure structure exists
                             
                             if (samplesLeft && samplesRight && samplesLeft.length > 0) {
-                                this.rawAudioSamples.left.push(...samplesLeft);
-                                this.rawAudioSamples.right.push(...samplesRight);
+                                this.appendSamples(this.rawAudioSamples.left, samplesLeft);
+                                this.appendSamples(this.rawAudioSamples.right, samplesRight);
                                 console.log('AudioWorklet stereo chunk received:', samplesLeft.length, 'samples per channel, total L/R:', 
                                     this.rawAudioSamples.left.length, '/', this.rawAudioSamples.right.length);
                             } else if (samples && samples.length > 0) {
                                 // Fallback for mono
-                                this.rawAudioSamples.left.push(...samples);
-                                this.rawAudioSamples.right.push(...samples);
+                                this.appendSamples(this.rawAudioSamples.left, samples);
+                                this.appendSamples(this.rawAudioSamples.right, samples);
                                 console.log('AudioWorklet mono chunk received:', samples.length, 'samples, duplicated to stereo');
                             } else {
                                 console.warn('AudioWorklet chunk received with no valid samples');
@@ -1440,13 +1475,13 @@
                             this.validateAudioSamples(); // Ensure structure exists
                             
                             if (samplesLeft && samplesRight && samplesLeft.length > 0) {
-                                this.rawAudioSamples.left.push(...samplesLeft);
-                                this.rawAudioSamples.right.push(...samplesRight);
+                                this.appendSamples(this.rawAudioSamples.left, samplesLeft);
+                                this.appendSamples(this.rawAudioSamples.right, samplesRight);
                                 console.log(`Raw PCM recording completed: ${this.rawAudioSamples.left.length} samples per channel, ${duration.toFixed(2)}s`);
                             } else if (samples && samples.length > 0) {
                                 // Fallback for mono
-                                this.rawAudioSamples.left.push(...samples);
-                                this.rawAudioSamples.right.push(...samples);
+                                this.appendSamples(this.rawAudioSamples.left, samples);
+                                this.appendSamples(this.rawAudioSamples.right, samples);
                                 console.log(`Raw PCM recording completed (mono): ${samples.length} samples, ${duration.toFixed(2)}s`);
                             } else {
                                 console.warn('AudioWorklet recording stopped with no valid samples');
@@ -1577,6 +1612,8 @@
             }
 
             stopAudio() {
+                this.logClockSync('capture_stop', this.audioContext);
+                this.logClockSync('playback_stop', this.chirpPlaybackContext);
                 // Stop raw PCM capture
                 if (this.audioWorkletNode) {
                     this.audioWorkletNode.port.postMessage({ command: 'stop' });
@@ -1990,6 +2027,8 @@
                                 txtContent += `System Latency: Not calibrated (use Calibrate System Latency button)\n`;
                                 txtContent += `Note: Chirp playback times are trigger times only. Actual audio output may have additional latency.\n`;
                             }
+                            txtContent += this.buildMetadataSection();
+                            txtContent += this.buildCaptureIntegritySection();
                             txtContent += `\n=== Chirp Timing Events ===\n`;
                             
                             // Add all chirp timing events
@@ -2007,6 +2046,10 @@
                                     if (timeMatch) {
                                         const firstChirpTimestamp = parseFloat(timeMatch[1]);
                                         const recordingStartTime = firstChirpTimestamp - 1; // 1 second before first chirp
+                                        // Fabricated: the real start was never logged. Mark it so no
+                                        // analysis mistakes this guess for a measured timestamp.
+                                        logEntries.unshift('WARNING recording_start_fabricated '
+                                            + '(no measured start; value below is a guess, do not trust timing)');
                                         logEntries.unshift(`Stereo Recording Started at ${recordingStartTime}`);
                                     }
                                 }
@@ -2205,6 +2248,164 @@
                 statusElement.style.fontWeight = 'bold';
             }
 
+
+            // ==== Audio clock synchronisation and session provenance ========
+            // Date.now() and AudioContext.currentTime are different clocks:
+            // wall time, versus a counter that advances with the audio
+            // hardware's own sample rate. The capture is indexed in samples, so
+            // a chirp stamped only with Date.now() cannot be placed at a sample
+            // index after the fact. Record both clocks together at every
+            // start/stop, with the latencies that sit between "scheduled" and
+            // "left the speaker", so the mapping is recoverable from the log.
+            // Array.push with a spread of ~100k arguments can exceed the engine's
+            // argument limit and throw, which inside a message handler would lose
+            // the whole chunk without stopping the recording. Append in blocks.
+            appendSamples(dst, src) {
+                const B = 4096;
+                for (let i = 0; i < src.length; i += B) {
+                    dst.push.apply(dst, src.subarray(i, Math.min(i + B, src.length)));
+                }
+            }
+
+            logClockSync(label, ctx) {
+                const parts = ['clock_sync ' + label,
+                               `date_now=${(Date.now() / 1000).toFixed(6)}`];
+                if (ctx && ctx.state !== 'closed') {
+                    const base = (typeof ctx.baseLatency === 'number') ? ctx.baseLatency.toFixed(6) : 'unavailable';
+                    const out = (typeof ctx.outputLatency === 'number') ? ctx.outputLatency.toFixed(6) : 'unavailable';
+                    parts.push(`ctx_time=${ctx.currentTime.toFixed(6)}`);
+                    parts.push(`base_latency=${base}`);
+                    parts.push(`output_latency=${out}`);
+                    parts.push(`sample_rate=${ctx.sampleRate}`);
+                    parts.push(`state=${ctx.state}`);
+                } else {
+                    parts.push('ctx_time=unavailable base_latency=unavailable output_latency=unavailable');
+                }
+                this.chirpTimingLog.push(parts.join(' '));
+                console.log('[clock_sync]', parts.join(' '));
+            }
+
+            // Schedule a chirp at a named context time instead of "now".
+            // source.start() with no argument fires at the next render quantum,
+            // so the real emission instant is unknown to within ~2.7 ms and is
+            // recorded nowhere. Naming the time makes it sample-accurate and
+            // loggable, which also absorbs setInterval's own jitter: whatever
+            // time the timer fires, the emission instant is the one logged.
+            scheduleChirp(buffer) {
+                if (!buffer) throw new Error('scheduleChirp: no chirp buffer loaded');
+                const ctx = this.chirpPlaybackContext;
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(ctx.destination);
+                const ctxAtTrigger = ctx.currentTime;
+                const when = ctxAtTrigger + this.CHIRP_SCHEDULE_LEAD;
+                source.start(when);
+                return { ctxAtTrigger: ctxAtTrigger, when: when, source: source };
+            }
+
+            chirpFields(sched) {
+                if (!sched) return '';
+                return ` ctx=${sched.ctxAtTrigger.toFixed(6)} sched=${sched.when.toFixed(6)}`;
+            }
+
+            recordSessionMetadata(stream) {
+                const info = { userAgent: navigator.userAgent };
+                try {
+                    const t = (stream && stream.getAudioTracks) ? stream.getAudioTracks()[0] : null;
+                    info.trackLabel = t ? t.label : null;
+                    info.trackSettings = (t && t.getSettings) ? t.getSettings() : null;
+                    info.trackConstraints = (t && t.getConstraints) ? t.getConstraints() : null;
+                } catch (e) {
+                    info.trackSettings = null;
+                    info.trackError = String(e && e.message || e);
+                }
+                this.sessionMetadata = info;
+                console.log('[session metadata]', info);
+            }
+
+            // The OS media volume is not exposed to the web, so report what is
+            // knowable. Without this, a level difference between two headsets
+            // cannot be told apart from a difference in the rooms.
+            systemVolumeNote() {
+                const g = (this.chirpGainNode && this.chirpGainNode.gain)
+                    ? this.chirpGainNode.gain.value : null;
+                return `os_volume=unavailable(no web API) app_gain=${g === null ? 'unity(no gain node)' : g}`;
+            }
+
+            buildMetadataSection() {
+                const m = this.sessionMetadata || {};
+                let s = '\n=== Session Metadata ===\n';
+                s += `user_agent: ${m.userAgent || 'unavailable'}\n`;
+                s += `track_label: ${m.trackLabel || 'unavailable'}\n`;
+                if (m.trackSettings) {
+                    const t = m.trackSettings;
+                    s += `track_settings: sampleRate=${t.sampleRate} channelCount=${t.channelCount}`
+                       + ` echoCancellation=${t.echoCancellation} noiseSuppression=${t.noiseSuppression}`
+                       + ` autoGainControl=${t.autoGainControl} latency=${t.latency}\n`;
+                    s += `track_settings_full: ${JSON.stringify(t)}\n`;
+                } else {
+                    s += 'track_settings: unavailable\n';
+                }
+                if (m.trackConstraints) {
+                    s += `track_constraints: ${JSON.stringify(m.trackConstraints)}\n`;
+                }
+                s += `capture_context_sample_rate: ${this.audioContext ? this.audioContext.sampleRate : 'unavailable'}\n`;
+                s += `playback_context_sample_rate: ${this.chirpPlaybackContext ? this.chirpPlaybackContext.sampleRate : 'unavailable'}\n`;
+                s += `chirp_schedule_lead_s: ${this.CHIRP_SCHEDULE_LEAD}\n`;
+                const a = this.chirpAssetInfo;
+                if (a) {
+                    s += `chirp_asset: ${a.url} source=${a.source} bytes=${a.bytes}`
+                       + ` decoded_frames=${a.frames} decoded_sample_rate=${a.sampleRate}`
+                       + ` decoded_ms=${a.durationMs} channels=${a.channels}`
+                       + (a.error ? ` error=${a.error}` : '') + '\n';
+                } else {
+                    s += 'chirp_asset: NOT LOADED\n';
+                }
+                s += `system_volume: ${this.systemVolumeNote()}\n`;
+                return s;
+            }
+
+            buildCaptureIntegritySection() {
+                let s = '\n=== Capture Integrity ===\n';
+                const sum = this.captureSummary;
+                if (sum) {
+                    const sr = sum.contextSampleRate || 48000;
+                    s += `capture_summary expected_frames=${sum.expectedFrames}`
+                       + ` stored_frames=${sum.storedFrames} filled_frames=${sum.filledFrames}`
+                       + ` drop_events=${sum.dropEvents} context_sample_rate=${sr}\n`;
+                    if (sum.filledFrames > 0) {
+                        s += `WARNING: ${sum.dropEvents} capture gap(s) totalling ${sum.filledFrames}`
+                           + ` frames (${(sum.filledFrames / sr * 1000).toFixed(1)} ms) were filled`
+                           + ` with silence to keep sample index aligned to the audio clock.\n`;
+                    }
+                    if (sum.overflow) {
+                        s += 'WARNING: a gap exceeded the fill limit; this capture is not time-aligned.\n';
+                    }
+                } else {
+                    s += 'capture_summary: unavailable (no summary from the capture worklet)\n';
+                }
+                for (const g of (this.captureGaps || [])) {
+                    s += `capture_drop at_frame=${g.atFrame} missing=${g.missing}`
+                       + ` ctx_time=${Number(g.ctxTime).toFixed(6)}\n`;
+                }
+                return s;
+            }
+
+            showBlockingError(message) {
+                console.error('[BLOCKING]', message);
+                try { this.updateStatus(message, 'error'); } catch (e) {}
+                let el = document.getElementById('blockingErrorBanner');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.id = 'blockingErrorBanner';
+                    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;'
+                        + 'background:#b00020;color:#fff;font:bold 15px/1.4 sans-serif;'
+                        + 'padding:14px 18px;white-space:pre-wrap;box-shadow:0 2px 12px rgba(0,0,0,.5)';
+                    document.body.appendChild(el);
+                }
+                el.textContent = 'MEASUREMENT BLOCKED\n' + message;
+            }
+
             // Chirp Audio System
             async initializeChirpAudio(forceRecreate = false) {
                 try {
@@ -2221,6 +2422,9 @@
                     this.chirpAudio3 = null;
                     this.sweepLoadPromise = this.loadSweepFile();
                     this.chirp3LoadPromise = this.loadChirp3File();
+                    // failure state is recorded on the instance and surfaced by
+                    // showBlockingError; this only avoids an unhandled rejection
+                    this.chirp3LoadPromise.catch(() => {});
 
                     console.log('Chirp audio system initialized. state=', this.chirpPlaybackContext.state, 'sampleRate=', this.chirpPlaybackContext.sampleRate);
                 } catch (error) {
@@ -2286,7 +2490,22 @@
                     }
                     
                     const arrayBuffer = await response.arrayBuffer();
+                    const assetBytes = arrayBuffer.byteLength;
                     this.chirpAudio3 = await this.chirpPlaybackContext.decodeAudioData(arrayBuffer);
+                    this.chirpAssetFailed = false;
+                    this.chirpAssetInfo = {
+                        url: './multiband_chirp_10-16kHz_40ms.wav',
+                        source: 'file',
+                        bytes: assetBytes,
+                        frames: this.chirpAudio3.length,
+                        sampleRate: this.chirpAudio3.sampleRate,
+                        durationMs: +(this.chirpAudio3.duration * 1000).toFixed(3),
+                        channels: this.chirpAudio3.numberOfChannels
+                    };
+                    this.chirpTimingLog.push(`chirp_asset_loaded url=./multiband_chirp_10-16kHz_40ms.wav`
+                        + ` bytes=${assetBytes} decoded_frames=${this.chirpAudio3.length}`
+                        + ` decoded_sample_rate=${this.chirpAudio3.sampleRate}`
+                        + ` decoded_ms=${(this.chirpAudio3.duration * 1000).toFixed(3)}`);
                     
                     console.log('Third chirp audio loaded successfully:', {
                         duration: this.chirpAudio3.duration,
@@ -2297,15 +2516,40 @@
                     this.updateStatus('Third chirp audio loaded successfully', 'success');
                     
                 } catch (error) {
-                    console.warn('Could not load third chirp file:', error);
-                    this.updateStatus('Third chirp file not found - please add multiband_chirp_10-16kHz_40ms.wav to project', 'warning');
-                    
-                    // Generate a synthetic chirp as fallback
-                    this.generateSyntheticChirp3();
+                    // Never substitute a synthesised sweep for the asset. The
+                    // stand-in is a different waveform and a different length, so a
+                    // failed load would come back as a device or room difference in
+                    // the results instead of as an error. Refuse to record.
+                    const reason = String((error && error.message) || error);
+                    this.chirpAssetFailed = true;
+                    this.chirpAudio3 = null;
+                    this.chirpAssetInfo = {
+                        url: './multiband_chirp_10-16kHz_40ms.wav',
+                        source: 'LOAD FAILED', bytes: 0, frames: 0,
+                        sampleRate: 0, durationMs: 0, channels: 0, error: reason
+                    };
+                    this.chirpTimingLog.push(
+                        `ERROR chirp_asset_load_failed url=./multiband_chirp_10-16kHz_40ms.wav reason=${reason}`);
+                    this.showBlockingError(
+                        'multiband_chirp_10-16kHz_40ms.wav failed to load or decode: ' + reason
+                        + '\nChirp playback is disabled. Do not record: there is no fallback,'
+                        + '\nbecause a synthesised stand-in would be indistinguishable from'
+                        + '\na device limitation in the results. Fix the asset and reload.');
+                    throw new Error('chirp asset load failed: ' + reason);
                 }
             }
 
+            // NOT a measurement path. Nothing calls this: a synthesised sweep is a
+            // different waveform and length from the asset, so using it silently
+            // would turn a failed asset load into a fake device difference. If it
+            // is ever wired up again, the provenance below must stay.
             generateSyntheticChirp3() {
+                this.chirpAssetInfo = {
+                    url: 'synthesised', source: 'SYNTHETIC-NOT-MEASUREMENT-GRADE',
+                    bytes: 0, frames: 0, sampleRate: 48000, durationMs: 40, channels: 1
+                };
+                this.chirpTimingLog.push('WARNING synthetic_chirp_in_use '
+                    + '(not the measurement asset; results are not comparable)');
                 try {
                     console.log('Generating synthetic multiband chirp...');
                     
@@ -2455,6 +2699,7 @@
                     
                     // Log start of continuous multiband chirp sequence
                     this.chirpTimingLog.push(`Continuous Multiband Chirp Sequence Started at ${startTimeSeconds} (2Hz for 10s, 10-16kHz)`);
+                    this.logClockSync('playback_start', this.chirpPlaybackContext);
                     
                     // Set up interval for 2Hz (every 500ms)
                     this.continuousMultibandInterval = setInterval(async () => {
@@ -2463,15 +2708,12 @@
                             const currentTimeSeconds = currentTime / 1000;
                             
                             // Create and play chirp
-                            const source = this.chirpPlaybackContext.createBufferSource();
-                            source.buffer = this.chirpAudio3; // Using chirp3 (10-16kHz multiband)
-                            source.connect(this.chirpPlaybackContext.destination);
-                            source.start();
+                            const chirpSched = this.scheduleChirp(this.chirpAudio3);
                             
                             this.continuousMultibandCount++;
                             
                             // Log each chirp in the sequence
-                            this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultibandCount}/20 at ${currentTimeSeconds}`);
+                            this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultibandCount}/20 at ${currentTimeSeconds}${this.chirpFields(chirpSched)}`);
                             
                             // Store chirp event in audio data
                             if (this.audioData) {
@@ -2561,16 +2803,14 @@
                     const startTimeSeconds = startTime / 1000;
                     this.ensureRecordingStartLogged();
                     this.chirpTimingLog.push(`Continuous Multiband Chirp Sequence Started at ${startTimeSeconds} (2Hz for 30s, 10-16kHz)`);
+                    this.logClockSync('playback_start', this.chirpPlaybackContext);
                     this.continuousMultiband30Interval = setInterval(async () => {
                         try {
                             const currentTime = Date.now();
                             const currentTimeSeconds = currentTime / 1000;
-                            const source = this.chirpPlaybackContext.createBufferSource();
-                            source.buffer = this.chirpAudio3;
-                            source.connect(this.chirpPlaybackContext.destination);
-                            source.start();
+                            const chirpSched = this.scheduleChirp(this.chirpAudio3);
                             this.continuousMultiband30Count++;
-                            this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultiband30Count}/60 at ${currentTimeSeconds}`);
+                            this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultiband30Count}/60 at ${currentTimeSeconds}${this.chirpFields(chirpSched)}`);
                             if (this.audioData) {
                                 this.audioData.push({
                                     timestamp: currentTime,
@@ -2641,22 +2881,17 @@
                     const startTimeSeconds = startTime / 1000;
                     this.ensureRecordingStartLogged();
                     this.chirpTimingLog.push(`Continuous Multiband Chirp Sequence Started at ${startTimeSeconds} (2Hz for 5min, 10-16kHz)`);
+                    this.logClockSync('playback_start', this.chirpPlaybackContext);
 
                     this.continuousMultiband5minInterval = setInterval(async () => {
                         try {
                             const currentTime = Date.now();
                             const currentTimeSeconds = currentTime / 1000;
-                            const source = this.chirpPlaybackContext.createBufferSource();
-                            source.buffer = this.chirpAudio3;
-                            source.connect(this.chirpPlaybackContext.destination);
-                            source.start();
+                            const chirpSched = this.scheduleChirp(this.chirpAudio3);
 
                             this.continuousMultiband5minCount++;
 
-                            // 5min 数据很多，日志每10次记录一次避免太大
-                            if (this.continuousMultiband5minCount % 10 === 0 || this.continuousMultiband5minCount === 1) {
-                                this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultiband5minCount}/300 at ${currentTimeSeconds}`);
-                            }
+                            this.chirpTimingLog.push(`Continuous Multiband Chirp ${this.continuousMultiband5minCount}/300 at ${currentTimeSeconds}${this.chirpFields(chirpSched)}`);
 
                             if (this.audioData) {
                                 this.audioData.push({
@@ -2743,6 +2978,7 @@
                     
                     // Log start of dualband 10Hz chirp sequence
                     this.chirpTimingLog.push(`Dualband Chirp Sequence Started at ${startTimeSeconds} (10Hz for 30s, 10-16kHz)`);
+                    this.logClockSync('playback_start', this.chirpPlaybackContext);
                     
                     // Set up interval for 10Hz (every 100ms)
                     this.dualband10HzInterval = setInterval(async () => {
@@ -2751,17 +2987,11 @@
                             const currentTimeSeconds = currentTime / 1000;
                             
                             // Create and play chirp
-                            const source = this.chirpPlaybackContext.createBufferSource();
-                            source.buffer = this.chirpAudio3; // Using chirp3 (10-16kHz multiband/dualband)
-                            source.connect(this.chirpPlaybackContext.destination);
-                            source.start();
+                            const chirpSched = this.scheduleChirp(this.chirpAudio3);
                             
                             this.dualband10HzCount++;
                             
-                            // Log each chirp in the sequence (log every 10th chirp to avoid spam)
-                            if (this.dualband10HzCount % 10 === 0 || this.dualband10HzCount === 1) {
-                                this.chirpTimingLog.push(`Dualband Chirp ${this.dualband10HzCount}/300 at ${currentTimeSeconds}`);
-                            }
+                            this.chirpTimingLog.push(`Dualband Chirp ${this.dualband10HzCount}/300 at ${currentTimeSeconds}${this.chirpFields(chirpSched)}`);
                             
                             // Store chirp event in audio data
                             if (this.audioData) {
@@ -2890,20 +3120,16 @@
                     const startTimeSeconds = startTime / 1000;
                     this.ensureRecordingStartLogged();
                     this.chirpTimingLog.push(`Dualband 2Hz + ${label} Started at ${startTimeSeconds} (2Hz for 150s, 10-16kHz)`);
+                    this.logClockSync('playback_start', this.chirpPlaybackContext);
 
                     this.dualband2HzBgInterval = setInterval(() => {
                         try {
                             const currentTime = Date.now();
                             const currentTimeSeconds = currentTime / 1000;
-                            const source = this.chirpPlaybackContext.createBufferSource();
-                            source.buffer = this.chirpAudio3;
-                            source.connect(this.chirpPlaybackContext.destination);
-                            source.start();
+                            const chirpSched = this.scheduleChirp(this.chirpAudio3);
 
                             this.dualband2HzBgCount++;
-                            if (this.dualband2HzBgCount % 10 === 0 || this.dualband2HzBgCount === 1) {
-                                this.chirpTimingLog.push(`Dualband 2Hz + ${label} Chirp ${this.dualband2HzBgCount}/300 at ${currentTimeSeconds}`);
-                            }
+                            this.chirpTimingLog.push(`Dualband 2Hz + ${label} Chirp ${this.dualband2HzBgCount}/300 at ${currentTimeSeconds}${this.chirpFields(chirpSched)}`);
                             buttonEl.textContent = `🔁 Playing... (${this.dualband2HzBgCount}/300)`;
                         } catch (error) {
                             console.error('Error during dualband 2Hz + background playback:', error);
@@ -3355,6 +3581,9 @@
                 // Clear chirp timing log
                 this.chirpTimingLog = [];
                 this.audioRecordingStartTime = null;
+                this.captureGaps = [];
+                this.captureSummary = null;
+                this.sessionMetadata = null;
                 
                 // Clear XR path log
                 this.xrPathLog = [];
