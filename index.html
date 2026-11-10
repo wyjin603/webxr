@@ -244,11 +244,22 @@
 
                 // Hardcoded Supabase configuration (publishable key only; never use service_role here)
                 this.supabaseConfig = {
-                    url: 'https://tsqwvvguzpiwaqqzrgcz.supabase.co',
-                    key: 'sb_publishable_CRR2eWSLkB0hzO3EYqb43w_Nrk_DFls',
+                    url: 'https://hfuydqhhkvgcpktfwkgj.supabase.co',
+                    key: 'sb_publishable_xpN2VmASj7yO9HxBLwaH1w_qZT0c1pF',
                     bucket: 'dataxr'
                 };
-                
+                // Settings saved with "Save Supabase Config" override the values above. The project
+                // below was deleted (Nov 2026); a browser that saved it would keep uploading into
+                // nothing, so forget saved settings that point at it.
+                try {
+                    const retired = ['https://tsqwvvguzpiwaqqzrgcz.supabase.co'];
+                    const saved = (localStorage.getItem('supabase_url') || '').replace(/\/+$/, '');
+                    if (retired.includes(saved)) {
+                        ['supabase_url', 'supabase_anon_key', 'supabase_bucket'].forEach(k => localStorage.removeItem(k));
+                        console.warn('[supabase] dropped saved config for retired project', saved);
+                    }
+                } catch (e) { /* storage unavailable: built-in config is used */ }
+
                 // VR Controller support
                 this.controllers = [];
                 this.vrButtonStates = {
