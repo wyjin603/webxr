@@ -1231,30 +1231,12 @@
                     let stream;
                     try {
                         // Try stereo first
-                        stream = await navigator.mediaDevices.getUserMedia({ 
-                        audio: {
-                            sampleRate: 48000,           // 48kHz
-                                channelCount: 2,             // Stereo (dual channel)
-                            echoCancellation: false,
-                            noiseSuppression: false,
-                            autoGainControl: false,
-                            latency: 0.01               // Low latency
-                        } 
-                        });
+                        stream = await navigator.mediaDevices.getUserMedia({ audio: this.rawAudioConstraints(2) });
                         console.log('Stereo audio access granted');
                     } catch (stereoError) {
                         console.warn('Stereo audio failed, trying mono:', stereoError.message);
                         // Fallback to mono
-                        stream = await navigator.mediaDevices.getUserMedia({ 
-                            audio: {
-                                sampleRate: 48000,
-                                channelCount: 1,             // Mono fallback
-                                echoCancellation: false,
-                                noiseSuppression: false,
-                                autoGainControl: false,
-                                latency: 0.01
-                            } 
-                        });
+                        stream = await navigator.mediaDevices.getUserMedia({ audio: this.rawAudioConstraints(1) });
                         console.log('Mono audio access granted');
                         this.audioChannelCount = 1;
                     }
@@ -1268,7 +1250,8 @@
                     if (audioTracks.length === 0) {
                         throw new Error('No audio tracks found in stream');
                     }
-                    
+                    await this.enforceRawCapture(audioTracks[0]);
+
                     console.log('Audio track info:', {
                         label: audioTracks[0].label,
                         enabled: audioTracks[0].enabled,
@@ -1321,7 +1304,11 @@
                     this.recordSessionMetadata(stream);
                     this.logClockSync('capture_start', this.audioContext);
                     
-                    this.updateStatus(`Raw PCM recording started at ${this.audioContext.sampleRate}Hz`, 'success');
+                    if (this.captureProcessingWarning) {
+                        this.updateStatus(this.captureProcessingWarning, 'error');
+                    } else {
+                        this.updateStatus(`Raw PCM recording started at ${this.audioContext.sampleRate}Hz`, 'success');
+                    }
                     
                 } catch (error) {
                     console.error('Audio initialization failed:', error);
@@ -1361,10 +1348,13 @@
                     
                     // Very basic audio request
                     const stream = await navigator.mediaDevices.getUserMedia({ 
-                        audio: true  // No constraints
+                        // No rate/channel demands, but still ask for unprocessed audio:
+                        // plain `audio: true` means AEC + NS + AGC all on.
+                        audio: this.rawAudioConstraints(null)
                     });
                     
                     console.log('Basic audio access granted');
+                    await this.enforceRawCapture(stream.getAudioTracks()[0]);
                     this.audioChannelCount = 1; // Assume mono for basic access
                     
                     // Create basic audio context
@@ -1381,7 +1371,13 @@
                     // Initialize basic raw audio capture
                     await this.initializeRawAudioCapture(this.microphone);
                     
-                    this.updateStatus('Basic audio initialized successfully', 'success');
+                    this.recordSessionMetadata(stream);
+                    this.logClockSync('capture_start', this.audioContext);
+                    if (this.captureProcessingWarning) {
+                        this.updateStatus(this.captureProcessingWarning, 'error');
+                    } else {
+                        this.updateStatus('Basic audio initialized successfully', 'success');
+                    }
                     this.startAudioBtn.textContent = 'Stop Audio Analysis';
                     this.startDataCollection();
                     
@@ -2308,6 +2304,62 @@
                 return ` ctx=${sched.ctxAtTrigger.toFixed(6)} sched=${sched.when.toFixed(6)}`;
             }
 
+            // ==== Unprocessed capture ========================================
+            // The probe is a low-level 10-16 kHz chirp train: exactly what an
+            // echo canceller, noise suppressor or AGC is built to remove or
+            // level. These constraints are only requests; a browser may ignore
+            // them, and anything below the browser (OS voice processing, mic
+            // beamforming, hardware high-pass) is not reachable from a web page
+            // at all. So ask, then check what was actually delivered, and put
+            // the answer in the session log and on screen.
+            rawAudioConstraints(channelCount) {
+                const c = {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                    voiceIsolation: false
+                };
+                if (channelCount) {
+                    c.sampleRate = 48000;
+                    c.channelCount = channelCount;
+                    c.latency = 0.01;
+                }
+                return c;
+            }
+
+            async enforceRawCapture(track) {
+                const KEYS = ['echoCancellation', 'noiseSuppression', 'autoGainControl', 'voiceIsolation'];
+                const read = () => (track && track.getSettings) ? track.getSettings() : {};
+                const stillOn = () => { const s = read(); return KEYS.filter(k => s[k] === true); };
+                const report = { onAtStart: [], onAfterRetry: [], unreported: [], retried: false, retryError: null };
+                this.captureProcessingWarning = null;
+                try {
+                    report.onAtStart = stillOn();
+                    if (report.onAtStart.length && track.applyConstraints) {
+                        report.retried = true;
+                        const c = {};
+                        KEYS.forEach(k => { c[k] = report.onAtStart.includes(k) ? { exact: false } : false; });
+                        try { await track.applyConstraints(c); }
+                        catch (e) { report.retryError = String(e && (e.name + ': ' + e.message) || e); }
+                    }
+                    report.onAfterRetry = stillOn();
+                    const s = read();
+                    // Not reported means unknown, not off.
+                    report.unreported = KEYS.filter(k => !(k in s));
+                } catch (e) {
+                    report.retryError = String(e && e.message || e);
+                }
+                this.captureProcessing = report;
+                if (report.onAfterRetry.length) {
+                    this.captureProcessingWarning = 'Browser is still applying '
+                        + report.onAfterRetry.join(', ') + ' to the microphone: this capture is filtered';
+                    console.warn('[capture processing]', report);
+                } else {
+                    console.log('[capture processing]', report);
+                }
+                return report;
+            }
+
             recordSessionMetadata(stream) {
                 const info = { userAgent: navigator.userAgent };
                 try {
@@ -2348,6 +2400,16 @@
                 }
                 if (m.trackConstraints) {
                     s += `track_constraints: ${JSON.stringify(m.trackConstraints)}\n`;
+                }
+                const p = this.captureProcessing;
+                if (p) {
+                    s += `capture_processing: still_on=[${p.onAfterRetry.join(',')}]`
+                       + ` on_at_start=[${p.onAtStart.join(',')}]`
+                       + ` not_reported_by_browser=[${p.unreported.join(',')}]`
+                       + ` retried=${p.retried}`
+                       + (p.retryError ? ` retry_error=${p.retryError}` : '') + '\n';
+                } else {
+                    s += 'capture_processing: unavailable\n';
                 }
                 s += `capture_context_sample_rate: ${this.audioContext ? this.audioContext.sampleRate : 'unavailable'}\n`;
                 s += `playback_context_sample_rate: ${this.chirpPlaybackContext ? this.chirpPlaybackContext.sampleRate : 'unavailable'}\n`;
